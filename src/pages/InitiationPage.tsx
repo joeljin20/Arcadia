@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Sparkles, Camera, RefreshCw, Cpu } from 'lucide-react';
+import { X, Sparkles, Camera, RefreshCw, Cpu, ShieldCheck, UserCircle } from 'lucide-react';
 import '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import * as mobilenet from '@tensorflow-models/mobilenet';
 import { ai } from '../services/gemini';
-import { playRitualSound, playAccessGranted } from '../services/audio';
+import { playRitualSound, playAccessGranted, playTerminalError } from '../services/audio';
+import { loginWithAlias } from '../services/mockDB';
 
 type VisionPrediction = { className: string; probability: number };
 
@@ -120,7 +121,7 @@ async function warmupModel(model: mobilenet.MobileNet) {
 }
 
 export function InitiationPage({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [step, setStep] = useState<'VISION' | 'PUZZLE' | 'RICKROLL'>('VISION');
+  const [step, setStep] = useState<'AUTH' | 'VISION' | 'PUZZLE' | 'RICKROLL'>('AUTH');
 
   useEffect(() => {
     playRitualSound();
@@ -128,6 +129,14 @@ export function InitiationPage({ onClose, onSuccess }: { onClose: () => void; on
 
   return (
     <AnimatePresence mode="wait">
+      {step === 'AUTH' && (
+        <AuthGate 
+          key="auth"
+          onClose={onClose}
+          onLoginSuccess={onSuccess}
+          onInitiate={() => setStep('VISION')}
+        />
+      )}
       {step === 'VISION' && (
         <VisionScanner
           key="vision"
@@ -155,6 +164,103 @@ export function InitiationPage({ onClose, onSuccess }: { onClose: () => void; on
         <RickRollVideo key="rickroll" onClose={onClose} />
       )}
     </AnimatePresence>
+  );
+}
+
+function AuthGate({ onClose, onLoginSuccess, onInitiate }: { onClose: () => void; onLoginSuccess: () => void; onInitiate: () => void }) {
+  const [mode, setMode] = useState<'CHOICE' | 'LOGIN'>('CHOICE');
+  const [alias, setAlias] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleLogin = (e: FormEvent) => {
+    e.preventDefault();
+    const result = loginWithAlias(alias);
+    if (result) {
+      playAccessGranted();
+      onLoginSuccess();
+    } else {
+      playTerminalError();
+      setError('Alias not recognized on this device.');
+      setTimeout(() => setError(null), 3000);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-[#050810]/95 backdrop-blur-3xl flex items-center justify-center p-6 text-zinc-300">
+      <div className="max-w-xl w-full bg-zinc-950 border border-emerald-900/30 rounded-3xl p-12 shadow-[0_0_100px_rgba(16,185,129,0.1)] relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent"></div>
+        <button onClick={onClose} className="absolute top-6 right-6 text-zinc-600 hover:text-emerald-400 transition-colors">
+          <X className="w-5 h-5" />
+        </button>
+
+        <AnimatePresence mode="wait">
+          {mode === 'CHOICE' ? (
+            <motion.div key="choice" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-12 text-center">
+              <div className="space-y-4">
+                <div className="w-16 h-16 bg-emerald-950/30 border border-emerald-900/40 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <ShieldCheck className="w-8 h-8 text-emerald-500" />
+                </div>
+                <h2 className="text-3xl font-serif italic text-zinc-100">Welcome, Seeker</h2>
+                <p className="text-xs font-mono uppercase tracking-[0.3em] text-zinc-500">Accessing Arcadia Node 882</p>
+              </div>
+
+              <div className="grid gap-4">
+                <button 
+                  onClick={() => setMode('LOGIN')}
+                  className="w-full py-5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-2xl hover:bg-emerald-950/20 hover:border-emerald-900/50 transition-all flex items-center justify-center gap-4 group"
+                >
+                  <UserCircle className="w-5 h-5 text-zinc-600 group-hover:text-emerald-500" />
+                  <span className="font-bold uppercase tracking-widest text-sm">Return to Alias</span>
+                </button>
+                <button 
+                  onClick={onInitiate}
+                  className="w-full py-5 bg-emerald-600 text-black rounded-2xl font-bold uppercase tracking-widest text-sm hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/20"
+                >
+                  Start New Initiation
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div key="login" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="space-y-10">
+              <div className="text-center space-y-3">
+                <h3 className="text-2xl font-serif italic text-zinc-100">Identity Verification</h3>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-600">Enter your device-locked alias</p>
+              </div>
+
+              <form onSubmit={handleLogin} className="space-y-8">
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    autoFocus
+                    value={alias}
+                    onChange={(e) => setAlias(e.target.value)}
+                    placeholder="ALIA_ID..."
+                    className={`w-full bg-black border ${error ? 'border-red-500' : 'border-emerald-900/30'} focus:border-emerald-500 rounded-xl px-6 py-4 text-center font-mono text-xl text-emerald-400 outline-none transition-all placeholder:text-emerald-900/20 uppercase tracking-widest`}
+                  />
+                  {error && <p className="text-center text-[10px] text-red-500 font-mono mt-4 uppercase tracking-widest animate-pulse">{error}</p>}
+                </div>
+
+                <div className="flex gap-4">
+                  <button 
+                    type="button"
+                    onClick={() => setMode('CHOICE')}
+                    className="flex-1 py-4 bg-zinc-900 text-zinc-500 rounded-xl font-bold uppercase tracking-widest text-xs hover:text-zinc-300 transition-colors"
+                  >
+                    Back
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 py-4 bg-emerald-600 text-black rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-emerald-500 transition-all"
+                  >
+                    Verify
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
   );
 }
 
@@ -487,7 +593,7 @@ function InitiationPuzzle({ onClose, onSuccess }: { onClose: () => void; onSucce
     async function loadPuzzle() {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-lite',
+          model: 'gemini-1.5-flash',
           contents: 'Generate a short, cryptic initiation riddle suitable for a mysterious society. Output JSON strictly matching this shape: {"question": "...", "answer": "single word"}. No markdown.',
         });
         if (!active) return;

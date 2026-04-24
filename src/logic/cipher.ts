@@ -11,7 +11,7 @@ const SYMBOL_MAP: Record<string, string> = {
   tomorrow: "⏳", night: "🌙", urgent: "🔺", hidden: "🗝️", circle: "👁️",
   crystal: "💎", retiro: "🌳", meet: "🜁", the: "▪️", in: "▪️",
   at: "▪️", a: "▪️", to: "▪️", of: "▪️", and: "▪️",
-  oblivion: "🌑", password: "🔑", vial: "🧪", rain: "🌧️"
+  oblivion: "🌑", secret: "🌑", password: "🔑", vial: "🧪", rain: "🌧️"
 };
 
 export const encodeCipher = (text: string): string => {

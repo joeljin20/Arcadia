@@ -7,24 +7,51 @@ interface RecipeCardProps {
   isFeatured: boolean;
   onClick: () => void;
   isHidden?: boolean;
+  orbActive?: boolean;
+  energyPaused?: boolean;
+  onHiddenHoverChange?: (hovering: boolean) => void;
+  onCardHoverChange?: (hovering: boolean) => void;
 }
 
-export function RecipeCard({ recipe, isFeatured, onClick, isHidden = false }: RecipeCardProps) {
+export function RecipeCard({
+  recipe,
+  isFeatured,
+  onClick,
+  isHidden = false,
+  orbActive = false,
+  energyPaused = false,
+  onHiddenHoverChange,
+  onCardHoverChange,
+}: RecipeCardProps) {
   if (isFeatured) {
     return (
       <motion.div
         layoutId={`card-${recipe.id}`}
         onClick={onClick}
-        className="h-full bento-card p-10 md:p-14 flex flex-col justify-end md:justify-center relative overflow-hidden group min-h-[400px] cursor-pointer hover:border-emerald-200 transition-all hover:shadow-[0_20px_60px_rgb(0,0,0,0.08)] hover:-translate-y-1"
+        onMouseEnter={() => onCardHoverChange?.(true)}
+        onMouseLeave={() => onCardHoverChange?.(false)}
+        className="h-full bento-card p-7 md:p-10 lg:p-12 flex flex-col justify-end relative overflow-hidden group cursor-pointer border-emerald-500/25 bg-[#0b1111] hover:border-emerald-300/60 transition-all hover:shadow-[0_24px_70px_rgb(0,0,0,0.28)] hover:-translate-y-1"
       >
-        <div className="relative z-10 w-full md:w-[55%]">
-          <span className="bg-emerald-900/5 text-emerald-800 text-[10px] font-bold px-3 py-1.5 rounded-full mb-6 inline-block tracking-[0.2em] border border-emerald-900/10">FEATURED RECORD</span>
-          <h2 className="text-4xl md:text-5xl lg:text-6xl font-serif font-bold leading-[0.95] tracking-tighter mb-5 group-hover:text-emerald-900 transition-colors drop-shadow-sm">{recipe.title}</h2>
-          <p className="text-slate-500 font-medium leading-relaxed mb-8 line-clamp-3 md:line-clamp-4 text-base md:text-lg">{recipe.description}</p>
+        <div className={`recipe-orb ${orbActive ? 'recipe-orb-active' : ''}`}>
+          <Utensils className="w-4 h-4" />
         </div>
-        <div className="absolute right-0 top-0 w-full md:w-[60%] h-full z-0 pointer-events-none">
-          <div className="absolute inset-0 bg-gradient-to-t from-white/90 via-white/40 to-transparent md:bg-gradient-to-r md:from-[#FAF7F2] md:via-[#FAF7F2]/60 md:to-transparent z-10" />
-          <img src={recipe.image} className="w-full h-full object-cover opacity-40 group-hover:opacity-60 transition-all duration-1000 group-hover:scale-105" alt="" />
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          <img src={recipe.image} className="w-full h-full object-cover opacity-88 transition-all duration-700 group-hover:scale-105" alt="" />
+          <div className="absolute inset-0 bg-[#020706]/40" />
+          <div className="absolute inset-0 bg-[radial-gradient(100%_140%_at_80%_10%,rgba(16,185,129,0.14),transparent_60%)]" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#020705]/92 via-[#05110d]/70 to-[#020705]/30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#010302]/72 via-transparent to-[#010302]/20" />
+        </div>
+        <div className="relative z-10 w-full max-w-[min(70%,560px)]">
+          <span className="bg-emerald-500/18 text-emerald-100 text-[10px] font-bold px-3 py-1.5 rounded-full mb-5 inline-block tracking-[0.2em] border border-emerald-200/35">
+            FEATURED ARCHIVE
+          </span>
+          <h2 className="text-3xl md:text-5xl lg:text-6xl font-serif font-bold leading-[0.94] tracking-tighter mb-4 text-white drop-shadow-[0_3px_16px_rgba(0,0,0,0.65)]">
+            {recipe.title}
+          </h2>
+          <p className="text-slate-100/90 font-medium leading-relaxed mb-2 line-clamp-3 md:line-clamp-4 text-base md:text-lg drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)]">
+            {recipe.description}
+          </p>
         </div>
       </motion.div>
     );
@@ -33,9 +60,34 @@ export function RecipeCard({ recipe, isFeatured, onClick, isHidden = false }: Re
   // Secret card: outer wrapper provides the beam border, inner card is normal
   if (isHidden) {
     return (
-      <div className="h-full p-[2px] rounded-[2rem] relative overflow-hidden secret-beam-outer">
+      <div
+        className={`h-full p-[2px] rounded-[2rem] relative overflow-hidden secret-beam-outer ${
+          energyPaused ? 'energy-paused' : ''
+        }`}
+        onMouseEnter={() => {
+          onHiddenHoverChange?.(true);
+          onCardHoverChange?.(true);
+        }}
+        onMouseLeave={() => {
+          onHiddenHoverChange?.(false);
+          onCardHoverChange?.(false);
+        }}
+        onFocus={() => {
+          onHiddenHoverChange?.(true);
+          onCardHoverChange?.(true);
+        }}
+        onBlur={() => {
+          onHiddenHoverChange?.(false);
+          onCardHoverChange?.(false);
+        }}
+      >
         {/* Rotating conic-gradient beam */}
         <div className="beam-ring" />
+        <div className="beam-aura" />
+        <div className="corner-pulse corner-pulse-tl" />
+        <div className="corner-pulse corner-pulse-tr" />
+        <div className="corner-pulse corner-pulse-br" />
+        <div className="corner-pulse corner-pulse-bl" />
         {/* Normal card content, inset by the 2px padding */}
         <motion.div
           layoutId={`card-${recipe.id}`}
@@ -47,7 +99,7 @@ export function RecipeCard({ recipe, isFeatured, onClick, isHidden = false }: Re
               <h3 className="text-2xl font-serif font-bold tracking-tight pr-4 transition-colors leading-[1.1] group-hover:text-emerald-800">
                 {recipe.title}
               </h3>
-              <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-500 shadow-sm z-10 bg-white border border-slate-100 group-hover:-rotate-12 group-hover:bg-emerald-50 group-hover:text-emerald-600 group-hover:border-emerald-200 text-slate-400">
+              <div className={`recipe-orb recipe-orb-inline ${orbActive ? 'recipe-orb-active' : ''}`}>
                 <Utensils className="w-4 h-4" />
               </div>
             </div>
@@ -76,14 +128,16 @@ export function RecipeCard({ recipe, isFeatured, onClick, isHidden = false }: Re
     <motion.div
       layoutId={`card-${recipe.id}`}
       onClick={onClick}
-      className="h-full bento-card p-8 flex flex-col group min-h-[300px] cursor-pointer transition-all hover:-translate-y-1 relative overflow-hidden hover:border-emerald-200 hover:shadow-[0_20px_50px_rgb(0,0,0,0.06)]"
+      onMouseEnter={() => onCardHoverChange?.(true)}
+      onMouseLeave={() => onCardHoverChange?.(false)}
+      className="h-full bento-card p-6 md:p-7 flex flex-col group cursor-pointer transition-all hover:-translate-y-1 relative overflow-hidden hover:border-emerald-200 hover:shadow-[0_20px_50px_rgb(0,0,0,0.06)]"
     >
       <div className="relative z-10 flex flex-col h-full p-2 -m-2 rounded-2xl transition-all bg-white/60 backdrop-blur-[2px] group-hover:bg-transparent group-hover:backdrop-blur-none">
         <div className="flex justify-between items-start mb-5">
           <h3 className="text-2xl font-serif font-bold tracking-tight pr-4 transition-colors leading-[1.1] group-hover:text-emerald-800">
             {recipe.title}
           </h3>
-          <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-500 shadow-sm z-10 bg-white border border-slate-100 group-hover:-rotate-12 group-hover:bg-emerald-50 group-hover:text-emerald-600 group-hover:border-emerald-200 text-slate-400">
+          <div className={`recipe-orb recipe-orb-inline ${orbActive ? 'recipe-orb-active' : ''}`}>
             <Utensils className="w-4 h-4" />
           </div>
         </div>

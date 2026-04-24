@@ -32,11 +32,13 @@ function IngredientText({ ing, isSecret }: { ing: string; isSecret: boolean }) {
 export function RecipeDetail({
   recipe,
   onBack,
-  onPrivacy,
+  showCipherClue = false,
+  onInitiateDecryption,
 }: {
   recipe: Recipe;
   onBack: () => void;
-  onPrivacy?: () => void;
+  showCipherClue?: boolean;
+  onInitiateDecryption?: () => void;
 }) {
   const isSecret = recipe.id === 'obsidian_cipher_torte';
 
@@ -133,18 +135,25 @@ export function RecipeDetail({
             ))}
           </div>
 
-          {onPrivacy ? (
-            <div className="mt-16 p-8 bg-[#060d06] border border-emerald-900/60 rounded-3xl text-center space-y-4">
+          {showCipherClue && onInitiateDecryption ? (
+            <div className="mt-16 p-8 bg-[#060d06] border border-emerald-900/60 rounded-3xl text-center space-y-5">
               <div className="flex justify-center mb-2">
                 <Lock className="w-5 h-5 text-emerald-500/60" />
               </div>
-              <p className="text-emerald-500/60 font-mono text-[10px] uppercase tracking-[0.25em]">Access Restricted</p>
-              <h4 className="text-xl font-serif text-emerald-200/80 italic">The cipher awaits those who know the sequence.</h4>
+              <p className="text-emerald-500/60 font-mono text-[10px] uppercase tracking-[0.25em]">Cipher Fragments</p>
+              <h4 className="text-xl font-serif text-emerald-200/80 italic">
+                The archive answers only to aligned fragments. Continue the rite in the console.
+              </h4>
+              <div className="flex items-center justify-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400/70" />
+                <span className="w-2 h-2 rounded-full bg-emerald-400/45" />
+                <span className="w-2 h-2 rounded-full bg-emerald-400/30" />
+              </div>
               <button
-                onClick={onPrivacy}
+                onClick={onInitiateDecryption}
                 className="mt-2 px-8 py-3 bg-emerald-950 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/60 rounded-full text-xs font-bold uppercase tracking-widest transition-all hover:shadow-[0_0_20px_rgba(34,197,94,0.25)] font-mono"
               >
-                Privacy Protocol
+                Initiate Decryption
               </button>
             </div>
           ) : (

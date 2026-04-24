@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Cpu, ShieldAlert, X } from 'lucide-react';
 import { NUMBER_SEQUENCE } from '../config/constants';
@@ -16,11 +16,62 @@ interface HackerConsoleOverlayProps {
   onBreach: () => void;
 }
 
+type InputValidationState =
+  | 'IDLE'
+  | 'EMPTY'
+  | 'FORMAT_INVALID'
+  | 'LENGTH_INVALID'
+  | 'ORDER_INVALID'
+  | 'VALID';
+
 const GRID_NUMBERS = Array.from({ length: 16 }, (_, index) => index + 1);
 const WAITING_MESSAGE = '> WAITING_FOR_KEY_SEQUENCE...';
 
 function nextSessionId() {
   return Math.random().toString(16).slice(2, 10).toUpperCase();
+}
+
+function parseSequenceInput(raw: string): { state: InputValidationState; values: number[]; message: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { state: 'EMPTY', values: [], message: 'Enter the full key sequence before verifying.' };
+  }
+
+  if (/[a-z]/i.test(trimmed)) {
+    return { state: 'FORMAT_INVALID', values: [], message: 'Use numbers only with spaces, commas, or dashes.' };
+  }
+
+  const tokens = trimmed
+    .split(/[^0-9]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return { state: 'FORMAT_INVALID', values: [], message: 'Input format is invalid. Try 7 2 14 or 7-2-14.' };
+  }
+
+  const values = tokens.map((value) => Number(value));
+  const allFinite = values.every(Number.isFinite);
+  const inRange = values.every((value) => value >= 1 && value <= 16);
+
+  if (!allFinite || !inRange) {
+    return { state: 'FORMAT_INVALID', values: [], message: 'Values must be whole numbers between 1 and 16.' };
+  }
+
+  if (values.length !== NUMBER_SEQUENCE.length) {
+    return {
+      state: 'LENGTH_INVALID',
+      values,
+      message: `Expected ${NUMBER_SEQUENCE.length} numbers. You entered ${values.length}.`,
+    };
+  }
+
+  const inOrder = values.every((value, index) => value === NUMBER_SEQUENCE[index]);
+  if (!inOrder) {
+    return { state: 'ORDER_INVALID', values, message: 'Sequence rejected. Order does not match the key.' };
+  }
+
+  return { state: 'VALID', values, message: 'Sequence verified. Breaching node...' };
 }
 
 export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsoleOverlayProps) {
@@ -34,14 +85,33 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
   const [integrityError, setIntegrityError] = useState(false);
   const [breachCelebration, setBreachCelebration] = useState(false);
   const [sessionId, setSessionId] = useState(nextSessionId());
+  const [sequenceInput, setSequenceInput] = useState('');
+  const [typedValidationState, setTypedValidationState] = useState<InputValidationState>('IDLE');
+  const [typedValidationMessage, setTypedValidationMessage] = useState('');
+  const timeoutRefs = useRef<number[]>([]);
 
   const expectedRemaining = useMemo(() => NUMBER_SEQUENCE.slice(currentIndex), [currentIndex]);
 
+  const clearScheduledTimeouts = () => {
+    timeoutRefs.current.forEach((id) => window.clearTimeout(id));
+    timeoutRefs.current = [];
+  };
+
+  const schedule = (callback: () => void, delayMs: number) => {
+    const id = window.setTimeout(() => {
+      timeoutRefs.current = timeoutRefs.current.filter((existing) => existing !== id);
+      callback();
+    }, delayMs);
+    timeoutRefs.current.push(id);
+  };
+
   useEffect(() => {
     if (!isOpen) {
+      clearScheduledTimeouts();
       return;
     }
 
+    clearScheduledTimeouts();
     setStatus('STANDBY');
     setTerminalMessage(WAITING_MESSAGE);
     setTypedMessage('');
@@ -52,7 +122,16 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
     setIntegrityError(false);
     setBreachCelebration(false);
     setSessionId(nextSessionId());
+    setSequenceInput('');
+    setTypedValidationState('IDLE');
+    setTypedValidationMessage('');
   }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      clearScheduledTimeouts();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) {
@@ -75,6 +154,7 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
   }, [isOpen, terminalMessage]);
 
   const resetAfterFailure = () => {
+    clearScheduledTimeouts();
     setStatus('STANDBY');
     setTerminalMessage(WAITING_MESSAGE);
     setSelectedNumbers([]);
@@ -83,6 +163,32 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
     setIntegrity(0);
     setIntegrityError(false);
     setBreachCelebration(false);
+    setSequenceInput('');
+    setTypedValidationState('IDLE');
+    setTypedValidationMessage('');
+  };
+
+  const triggerBreach = () => {
+    // Shared success path for both node-click and typed-sequence verification.
+    playTerminalBreach();
+    setBreachCelebration(true);
+    setStatus('BREACHED');
+    setIntegrity(100);
+    setSelectedNumbers([...NUMBER_SEQUENCE]);
+    setCurrentIndex(NUMBER_SEQUENCE.length);
+    setTerminalMessage('> ACCESS_GRANTED // DECRYPTING_PAYLOAD...');
+
+    schedule(() => {
+      setTerminalMessage('> PAYLOAD: THE_OBSIDIAN_CIPHER_TORTE');
+    }, 700);
+
+    schedule(() => {
+      setTerminalMessage('> TRANSMISSION: ET_IN_ARCADIA_EGO');
+    }, 1500);
+
+    schedule(() => {
+      onBreach();
+    }, 3200);
   };
 
   const handleNumberClick = (value: number) => {
@@ -101,7 +207,7 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
       setIntegrityError(true);
       setTerminalMessage('> ERROR: ACCESS_DENIED // TRACE_ACTIVE');
 
-      window.setTimeout(() => {
+      schedule(() => {
         resetAfterFailure();
       }, 1500);
       return;
@@ -119,28 +225,48 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
     setTerminalMessage(`> SEGMENT_${nextIndex} VERIFIED`);
 
     if (nextIndex < NUMBER_SEQUENCE.length) {
-      window.setTimeout(() => {
+      schedule(() => {
         setStatus('STANDBY');
         setTerminalMessage(WAITING_MESSAGE);
       }, 420);
       return;
     }
 
-    playTerminalBreach();
-    setBreachCelebration(true);
-    setTerminalMessage('> ACCESS_GRANTED // DECRYPTING_PAYLOAD...');
+    triggerBreach();
+  };
 
-    window.setTimeout(() => {
-      setTerminalMessage('> PAYLOAD: THE_OBSIDIAN_CIPHER_TORTE');
-    }, 700);
+  const handleTypedSubmit = (event: FormEvent) => {
+    event.preventDefault();
 
-    window.setTimeout(() => {
-      setTerminalMessage('> TRANSMISSION: ET_IN_ARCADIA_EGO');
-    }, 1500);
+    if (!isOpen || status === 'LOCKED' || status === 'BREACHED') {
+      return;
+    }
 
-    window.setTimeout(() => {
-      onBreach();
-    }, 3200);
+    const parsed = parseSequenceInput(sequenceInput);
+    setTypedValidationState(parsed.state);
+    setTypedValidationMessage(parsed.message);
+
+    if (parsed.state !== 'VALID') {
+      playTerminalError();
+      setStatus('LOCKED');
+      setIntegrityError(true);
+      setTerminalMessage('> ERROR: ACCESS_DENIED // TRACE_ACTIVE');
+      setWrongNumber(null);
+      schedule(() => {
+        resetAfterFailure();
+      }, 1500);
+      return;
+    }
+
+    playTerminalSuccess();
+    setSelectedNumbers([...NUMBER_SEQUENCE]);
+    setCurrentIndex(NUMBER_SEQUENCE.length);
+    setIntegrity(100);
+    setTerminalMessage(`> SEGMENT_${NUMBER_SEQUENCE.length} VERIFIED`);
+
+    schedule(() => {
+      triggerBreach();
+    }, 420);
   };
 
   return (
@@ -213,6 +339,44 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                       );
                     })}
                   </div>
+
+                  <form onSubmit={handleTypedSubmit} className="border border-[#22c55e]/25 bg-[#061006] p-3 md:p-4 space-y-3">
+                    <label className="text-[10px] uppercase tracking-[0.2em] text-[#22c55e]/75 block">
+                      Type Sequence
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={sequenceInput}
+                        onChange={(event) => {
+                          setSequenceInput(event.target.value);
+                          if (typedValidationState !== 'IDLE') {
+                            setTypedValidationState('IDLE');
+                            setTypedValidationMessage('');
+                          }
+                        }}
+                        disabled={status === 'LOCKED' || status === 'BREACHED'}
+                        placeholder={`e.g. ${NUMBER_SEQUENCE.join('-')}`}
+                        className="flex-1 bg-black border border-[#22c55e]/30 px-3 py-2 text-xs md:text-sm font-mono text-[#22c55e] focus:outline-none focus:border-[#22c55e] placeholder:text-[#22c55e]/40"
+                      />
+                      <button
+                        type="submit"
+                        disabled={status === 'LOCKED' || status === 'BREACHED'}
+                        className="px-3 md:px-4 py-2 border border-[#22c55e]/45 text-[10px] md:text-xs font-bold uppercase tracking-widest hover:bg-[#22c55e]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Verify
+                      </button>
+                    </div>
+                    {typedValidationState !== 'IDLE' ? (
+                      <p
+                        className={`text-[10px] md:text-xs ${
+                          typedValidationState === 'VALID' ? 'text-[#22c55e]' : 'text-red-400'
+                        }`}
+                      >
+                        {typedValidationMessage}
+                      </p>
+                    ) : null}
+                  </form>
 
                   <div className={`${integrityError ? 'violent-glitch' : ''}`}>
                     <div className="flex items-center justify-between text-[10px] mb-2">

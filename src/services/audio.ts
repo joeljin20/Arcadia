@@ -8,6 +8,11 @@ function withAudio(callback: (audioCtx: AudioContext) => void) {
   }
 }
 
+interface ArcaneShimmerOptions {
+  volume?: number;
+  duration?: number;
+}
+
 export const playRitualSound = () => {
   withAudio((audioCtx) => {
     const oscillator = audioCtx.createOscillator();
@@ -103,5 +108,76 @@ export const playTerminalBreach = () => {
       oscillator.start(start);
       oscillator.stop(start + 0.2);
     });
+  });
+};
+
+export const playArcaneShimmer = (options?: ArcaneShimmerOptions) => {
+  const volume = options?.volume ?? 0.18;
+  const duration = options?.duration ?? 0.42;
+
+  withAudio((audioCtx) => {
+    const now = audioCtx.currentTime;
+    const output = audioCtx.createGain();
+    output.gain.setValueAtTime(volume, now);
+    output.connect(audioCtx.destination);
+
+    const shimmerOsc = audioCtx.createOscillator();
+    shimmerOsc.type = 'triangle';
+    shimmerOsc.frequency.setValueAtTime(720, now);
+    shimmerOsc.frequency.exponentialRampToValueAtTime(980, now + duration * 0.45);
+    shimmerOsc.frequency.exponentialRampToValueAtTime(640, now + duration);
+
+    const shimmerGain = audioCtx.createGain();
+    shimmerGain.gain.setValueAtTime(0.0001, now);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    shimmerOsc.connect(shimmerGain);
+    shimmerGain.connect(output);
+
+    const chimeOsc = audioCtx.createOscillator();
+    chimeOsc.type = 'sine';
+    chimeOsc.frequency.setValueAtTime(1180, now);
+    chimeOsc.frequency.exponentialRampToValueAtTime(1460, now + duration * 0.5);
+    chimeOsc.frequency.exponentialRampToValueAtTime(1080, now + duration);
+
+    const chimeGain = audioCtx.createGain();
+    chimeGain.gain.setValueAtTime(0.0001, now + 0.03);
+    chimeGain.gain.exponentialRampToValueAtTime(0.08, now + 0.08);
+    chimeGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    chimeOsc.connect(chimeGain);
+    chimeGain.connect(output);
+
+    // Subtle filtered noise burst for glassy sparkle texture.
+    const noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * duration), audioCtx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < data.length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * 0.18;
+    }
+
+    const noiseSource = audioCtx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    const noiseFilter = audioCtx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(2200, now);
+    noiseFilter.Q.setValueAtTime(2.2, now);
+
+    const noiseGain = audioCtx.createGain();
+    noiseGain.gain.setValueAtTime(0.0001, now);
+    noiseGain.gain.linearRampToValueAtTime(0.035, now + 0.04);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(output);
+
+    shimmerOsc.start(now);
+    chimeOsc.start(now);
+    noiseSource.start(now);
+
+    shimmerOsc.stop(now + duration);
+    chimeOsc.stop(now + duration);
+    noiseSource.stop(now + duration);
   });
 };

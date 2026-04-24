@@ -60,3 +60,9 @@ export interface UserSession {
 }
 
 export type HackerState = 'STANDBY' | 'SCANNING' | 'BREACHED' | 'LOCKED';
+
+export type UnlockStage =
+  | 'LOCKED_GRID_HINT'
+  | 'DETAIL_CLUE'
+  | 'CONSOLE_CHALLENGE'
+  | 'UNLOCKED';

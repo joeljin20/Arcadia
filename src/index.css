@@ -175,49 +175,199 @@
   animation: violent-shake 0.5s ease;
 }
 
-/* Secret recipe card — beam of green light orbiting the border */
-
-/* Outer wrapper: faint emerald base (always-visible border) + clips the spinning beam */
+/* Secret recipe card — electric arcane perimeter */
 .secret-beam-outer {
-  background: rgba(34, 197, 94, 0.12);
-  /* overflow:hidden is set inline via Tailwind */
+  isolation: isolate;
+  background: transparent;
 }
 
-/* The spinning conic-gradient "shooting star" */
 .beam-ring {
   position: absolute;
-  /* Larger than the card so rotating it sweeps across all edges */
-  width: 200%;
-  height: 200%;
-  top: -50%;
-  left: -50%;
+  inset: -50%;
   background: conic-gradient(
     from 0deg,
-    transparent        0%,
-    transparent        80%,
-    rgba(34,197,94,.12)  84%,
-    rgba(52,211,153,.7)  88%,
-    rgba(134,239,172,1)  91%,
-    rgba(52,211,153,.7)  94%,
-    rgba(34,197,94,.12)  97%,
-    transparent        100%
+    transparent 0deg 338deg,
+    rgba(94, 234, 212, 0.12) 342deg,
+    rgba(16, 185, 129, 0.62) 348deg,
+    rgba(34, 211, 238, 0.76) 353deg,
+    rgba(167, 243, 208, 0.72) 357deg,
+    transparent 360deg
   );
-  animation: beam-rotate 2.8s linear infinite;
+  filter: saturate(1.3) blur(0.2px);
+  animation:
+    beam-orbit 3.9s linear infinite,
+    beam-drift 6.8s ease-in-out infinite,
+    beam-flicker 2.8s steps(2, end) infinite;
   pointer-events: none;
   z-index: 0;
 }
 
-@keyframes beam-rotate {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+.beam-aura {
+  position: absolute;
+  inset: -14%;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 18% 24%, rgba(52, 211, 153, 0.07), transparent 42%),
+    radial-gradient(circle at 82% 76%, rgba(34, 211, 238, 0.06), transparent 40%);
+  filter: blur(10px);
+  animation: aura-breathe 4.4s ease-in-out infinite;
 }
 
-/* Cipher number pulse — highlights secret ingredient quantities */
+.corner-pulse {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(110, 255, 214, 0.52) 0%, rgba(34, 211, 238, 0.22) 34%, transparent 70%);
+  filter: blur(1px);
+  opacity: 0.08;
+  animation: corner-surge 7.8s ease-in-out infinite;
+}
+
+.corner-pulse-tl { top: -7px; left: -7px; }
+.corner-pulse-tr { top: -7px; right: -7px; animation-delay: 2.2s; }
+.corner-pulse-br { bottom: -7px; right: -7px; animation-delay: 4.3s; }
+.corner-pulse-bl { bottom: -7px; left: -7px; animation-delay: 6.1s; }
+
+.secret-beam-outer:hover .beam-ring {
+  animation-duration: 4.5s, 7.4s, 3.2s;
+}
+
+.energy-paused .beam-ring,
+.energy-paused .beam-aura,
+.energy-paused .corner-pulse {
+  animation-play-state: paused;
+  opacity: 0.52;
+}
+
+/* Rotating recipe orb focus */
+.recipe-orb {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  background: rgba(255, 255, 255, 0.86);
+  color: rgba(100, 116, 139, 0.78);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.09);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.recipe-orb-inline {
+  position: relative;
+  inset: auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+}
+
+.recipe-orb-active {
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.48);
+  background: rgba(236, 253, 245, 0.92);
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.14),
+    0 3px 14px rgba(16, 185, 129, 0.2);
+  transform: none;
+}
+
+@keyframes beam-orbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes beam-drift {
+  0%, 100% { inset: -50%; }
+  48% { inset: -52%; }
+  78% { inset: -49%; }
+}
+
+@keyframes beam-flicker {
+  0% { opacity: 0.48; }
+  18% { opacity: 0.62; }
+  37% { opacity: 0.44; }
+  58% { opacity: 0.68; }
+  79% { opacity: 0.46; }
+  100% { opacity: 0.56; }
+}
+
+@keyframes aura-breathe {
+  0%, 100% { opacity: 0.32; transform: scale(1); }
+  50% { opacity: 0.52; transform: scale(1.02); }
+}
+
+@keyframes corner-surge {
+  0%, 76%, 100% {
+    opacity: 0.06;
+    transform: scale(0.8);
+  }
+  11% {
+    opacity: 0.42;
+    transform: scale(1.08);
+  }
+  22% {
+    opacity: 0.12;
+    transform: scale(0.9);
+  }
+}
+
 @keyframes cipher-pulse {
-  0%, 100% { opacity: 1; text-shadow: 0 0 8px rgba(34, 197, 94, 0.7); }
-  50% { opacity: 0.65; text-shadow: 0 0 18px rgba(34, 197, 94, 1); }
+  0%, 100% { opacity: 0.86; text-shadow: 0 0 8px rgba(16, 185, 129, 0.45); }
+  50% { opacity: 1; text-shadow: 0 0 16px rgba(16, 185, 129, 0.7), 0 0 22px rgba(34, 211, 238, 0.3); }
 }
 
 .cipher-pulse {
-  animation: cipher-pulse 2.2s ease-in-out infinite;
+  animation: cipher-pulse 2.3s ease-in-out infinite;
+}
+
+.cipher-pill {
+  min-width: 3.1rem;
+  height: 3.1rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(52, 211, 153, 0.6);
+  color: #4ade80;
+  background: linear-gradient(145deg, rgba(2, 24, 14, 0.96), rgba(3, 36, 22, 0.88));
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 185, 129, 0.2),
+    0 0 14px rgba(16, 185, 129, 0.24),
+    0 0 20px rgba(34, 211, 238, 0.12);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: cipher-pulse 2.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beam-ring,
+  .beam-aura,
+  .corner-pulse,
+  .recipe-orb,
+  .recipe-orb-active,
+  .cipher-pill,
+  .cipher-pulse,
+  .number-circle,
+  .number-circle:hover {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+
+  .secret-beam-outer {
+    background: rgba(11, 17, 14, 0.68);
+  }
 }

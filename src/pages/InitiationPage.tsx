@@ -111,20 +111,18 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
     const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            parts: [
-              { text: "Is the person in this photo holding a BIC PEN? Answer only with 'YES' or 'NO'." },
-              { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-            ]
-          }
-        ],
+      const geminiRes = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{
+          parts: [
+            { text: "Is the person in this photo holding a BIC PEN? Answer only with 'YES' or 'NO'." },
+            { inlineData: { mimeType: 'image/jpeg', data: base64Image } }
+          ]
+        }],
       });
+      const result = geminiRes.text?.toUpperCase().includes('YES') ? 'YES' : 'NO';
 
-      const text = response.text?.toUpperCase() || "";
-      if (text.includes("YES")) {
+      if (result === 'YES') {
         onSuccess();
       } else {
         onFailure();
@@ -133,7 +131,7 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
       setError("Vision algorithm failed. Please try again.");
     } finally {
       if (stream) {
-         setAnalyzing(false);
+        setAnalyzing(false);
       }
     }
   };
@@ -190,7 +188,7 @@ function InitiationPuzzle({ onClose, onSuccess }: { onClose: () => void; onSucce
     async function loadPuzzle() {
       try {
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-2.5-flash",
           contents: "Generate a short, cryptic initiation riddle suitable for a mysterious society. Output JSON strictly matching this shape: {\"question\": \"...\", \"answer\": \"single word\"}. No markdown.",
         });
         if (!active) return;

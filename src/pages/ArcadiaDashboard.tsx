@@ -65,7 +65,7 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
     async function loadLore() {
       try {
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-2.5-flash",
           contents: "Generate a mysterious, cryptic single-sentence prophecy about a dark, secretive underground hacking network called Arcadia.",
         });
         setProphecy(response.text || "The gavel falls where shadows stretch the longest.");

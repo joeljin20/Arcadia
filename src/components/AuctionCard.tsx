@@ -1,14 +1,19 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Gavel, KeyRound, AlertCircle } from 'lucide-react';
-import { AuctionLot } from '../types';
+import { Gavel, KeyRound, AlertCircle, History, TrendingUp, User } from 'lucide-react';
+import { AuctionLot, MemberIdentity } from '../types';
+import { placeBid } from '../services/mockDB';
 
-export function AuctionCard({ lot }: { lot: AuctionLot }) {
+export function AuctionCard({ lot, identity, onBidUpdate }: { lot: AuctionLot; identity: MemberIdentity | null; onBidUpdate: () => void }) {
   const [unlocked, setUnlocked] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [error, setError] = useState(false);
   const [displayedTitle, setDisplayedTitle] = useState('');
   const [displayedDesc, setDisplayedDesc] = useState('');
+  
+  const [bidAmount, setBidAmount] = useState<string>("");
+  const [bidError, setBidError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     if (!unlocked) { setDisplayedTitle(''); setDisplayedDesc(''); return; }
@@ -46,13 +51,39 @@ export function AuctionCard({ lot }: { lot: AuctionLot }) {
     }
   };
 
+  const handleBid = () => {
+    if (!identity) return;
+    const amount = parseInt(bidAmount);
+    const currentHighest = lot.highestBid || lot.startingBid;
+
+    if (isNaN(amount) || amount <= currentHighest) {
+      setBidError(`Bid must be higher than $${currentHighest.toLocaleString()}`);
+      setTimeout(() => setBidError(null), 3000);
+      return;
+    }
+
+    placeBid(lot.id, {
+      bidderId: identity.id,
+      bidderName: identity.codename,
+      amount: amount
+    });
+    
+    setBidAmount("");
+    onBidUpdate();
+  };
+
   return (
     <div className={`bg-black rounded-sm p-8 md:p-10 border border-zinc-900 shadow-[0_10px_40px_rgba(0,0,0,0.8)] relative group text-zinc-300 crt-effect ${error ? 'violent-glitch' : ''}`}>
       <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-emerald-900 via-emerald-900/50 to-transparent block"></div>
       <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-900/5 blur-[50px] pointer-events-none"></div>
 
       <div className="flex justify-between items-start mb-8 relative z-10">
-        <span className="text-[10px] font-mono tracking-[0.2em] uppercase text-emerald-500 font-bold bg-emerald-950/30 px-4 py-1.5 border border-emerald-900/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">Encrypted Lot</span>
+        <div className="flex flex-wrap gap-3">
+          <span className="text-[10px] font-mono tracking-[0.2em] uppercase text-emerald-500 font-bold bg-emerald-950/30 px-4 py-1.5 border border-emerald-900/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">Encrypted Lot</span>
+          {unlocked && (
+            <span className="text-[10px] font-mono tracking-[0.2em] uppercase text-amber-500 font-bold bg-amber-950/20 px-4 py-1.5 border border-amber-900/30">Active Auction</span>
+          )}
+        </div>
         <span className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase mt-2">ID: {lot.id.split('_')[1] || lot.id}</span>
       </div>
 
@@ -66,7 +97,7 @@ export function AuctionCard({ lot }: { lot: AuctionLot }) {
 
             <div className="flex items-center gap-4 text-zinc-400">
               <Gavel className="w-5 h-5" />
-              <span className="font-mono text-sm tracking-[0.2em] uppercase">Starting Bid: ???</span>
+              <span className="font-mono text-sm tracking-[0.2em] uppercase">Starting Bid: ${lot.startingBid.toLocaleString()} (Hidden)</span>
             </div>
 
             <div className="pt-6 relative">
@@ -121,22 +152,100 @@ export function AuctionCard({ lot }: { lot: AuctionLot }) {
                     <span className="inline-block w-0.5 h-5 bg-emerald-400 ml-0.5 animate-pulse align-middle" />
                   )}"
                 </p>
+                
+                <div className="grid grid-cols-2 gap-4 pt-4">
+                  <div className="bg-zinc-950 border border-zinc-900 p-4">
+                    <p className="text-[9px] uppercase tracking-widest text-zinc-500 mb-1">Starting Price</p>
+                    <p className="text-xl font-mono text-zinc-400">${lot.startingBid.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-emerald-950/10 border border-emerald-900/30 p-4 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-1">
+                      <TrendingUp className="w-3 h-3 text-emerald-500 opacity-50" />
+                    </div>
+                    <p className="text-[9px] uppercase tracking-widest text-emerald-600 mb-1">Current Highest</p>
+                    <p className="text-xl font-mono text-emerald-400">${(lot.highestBid || lot.startingBid).toLocaleString()}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-8 border-t border-zinc-900 mt-8">
-              <div className="flex items-center gap-4">
-                <div className="bg-zinc-900/50 p-3 rounded-sm border border-zinc-800">
-                  <Gavel className="w-5 h-5 text-zinc-400" />
+            <div className="flex flex-col gap-6 pt-8 border-t border-zinc-900 mt-8">
+              <div className="flex flex-col md:flex-row justify-between items-end gap-6">
+                <div className="w-full md:max-w-xs space-y-3">
+                   <div className="flex justify-between items-center">
+                      <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Your Offer</label>
+                      {bidError && <span className="text-[9px] text-red-500 animate-pulse font-bold uppercase">{bidError}</span>}
+                   </div>
+                   <div className="flex bg-zinc-950 border border-zinc-800 focus-within:border-emerald-900/50 transition-all">
+                      <div className="pl-4 py-3 flex items-center justify-center text-zinc-600">
+                        <span className="font-mono text-sm">$</span>
+                      </div>
+                      <input
+                        type="number"
+                        placeholder="ENTER AMOUNT..."
+                        value={bidAmount}
+                        onChange={(e) => setBidAmount(e.target.value)}
+                        className="w-full bg-transparent border-none text-sm font-mono text-emerald-400 placeholder-zinc-800 outline-none px-4 py-3 uppercase tracking-widest"
+                      />
+                   </div>
                 </div>
-                <div>
-                  <p className="text-[10px] uppercase font-mono tracking-widest text-zinc-500">Starting Bid</p>
-                  <p className="text-xl font-mono text-zinc-200">${lot.startingBid.toLocaleString()}</p>
+                
+                <div className="flex gap-4 w-full md:w-auto">
+                   <button 
+                     onClick={() => setShowHistory(!showHistory)}
+                     className={`flex-1 md:flex-none px-6 py-4 border border-zinc-800 text-[10px] font-mono font-bold uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${showHistory ? 'bg-zinc-800 text-zinc-100' : 'bg-black text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'}`}
+                   >
+                     <History className="w-4 h-4" />
+                     {showHistory ? "Hide Bids" : "View Bids"}
+                   </button>
+                   <button 
+                     onClick={handleBid}
+                     disabled={!bidAmount}
+                     className="flex-[2] md:flex-none px-10 py-4 bg-emerald-600 text-black text-[10px] font-mono font-bold uppercase tracking-[0.2em] hover:bg-emerald-400 transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] disabled:opacity-20"
+                   >
+                     Submit Bid
+                   </button>
                 </div>
               </div>
-              <button className="px-8 py-4 bg-emerald-950/30 text-emerald-500 border border-emerald-900/50 text-[10px] font-mono font-bold uppercase tracking-[0.2em] hover:bg-emerald-900/50 hover:text-emerald-300 transition-all shadow-[0_0_15px_rgba(16,185,129,0.1)] flex items-center gap-2">
-                Submit Bid
-              </button>
+
+              <AnimatePresence>
+                {showHistory && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden border-t border-zinc-900/50 pt-6"
+                  >
+                    <div className="space-y-2">
+                       <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-4 flex items-center gap-2">
+                         <History className="w-3 h-3" /> Transmission History: Bids
+                       </p>
+                       <div className="max-h-48 overflow-y-auto pr-2 space-y-1 custom-scrollbar">
+                         {lot.bids && lot.bids.length > 0 ? (
+                           lot.bids.map((bid, idx) => (
+                             <div key={bid.id} className={`flex items-center justify-between p-3 border ${idx === 0 ? 'bg-emerald-950/10 border-emerald-900/30' : 'bg-zinc-950/50 border-zinc-900/50'} group`}>
+                               <div className="flex items-center gap-3">
+                                 <User className={`w-3.5 h-3.5 ${idx === 0 ? 'text-emerald-500' : 'text-zinc-600'}`} />
+                                 <span className={`text-[11px] font-mono uppercase tracking-wider ${idx === 0 ? 'text-emerald-400' : 'text-zinc-400'}`}>
+                                   {bid.bidderName} {bid.bidderId === identity?.id && "(YOU)"}
+                                 </span>
+                               </div>
+                               <div className="flex items-center gap-4">
+                                 <span className="text-[10px] text-zinc-600 font-mono">{new Date(bid.timestamp).toLocaleTimeString()}</span>
+                                 <span className={`text-sm font-mono font-bold ${idx === 0 ? 'text-emerald-500' : 'text-zinc-300'}`}>
+                                   ${bid.amount.toLocaleString()}
+                                 </span>
+                               </div>
+                             </div>
+                           ))
+                         ) : (
+                           <p className="text-center py-8 text-zinc-700 text-[10px] uppercase tracking-widest border border-dashed border-zinc-900">No active bids detected in network</p>
+                         )}
+                       </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         )}

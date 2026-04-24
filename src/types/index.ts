@@ -14,6 +14,14 @@ export interface Recipe {
   steps: string[];
 }
 
+export interface Bid {
+  id: string;
+  bidderId: string;
+  bidderName: string;
+  amount: number;
+  timestamp: number;
+}
+
 export interface AuctionLot {
   id: string;
   originalTitle: string;
@@ -21,6 +29,8 @@ export interface AuctionLot {
   cipherTitle: string;
   cipherDescription: string;
   startingBid: number;
+  highestBid?: number;
+  bids: Bid[];
   decryptionKey: string;
   imageUrl: string;
   timestamp: number;
@@ -42,6 +52,7 @@ export interface MemberIdentity {
   id: string;
   codename: string;
   joinDate: number;
+  deviceId: string;
 }
 
 export interface DirectMessage {

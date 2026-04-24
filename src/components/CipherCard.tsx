@@ -35,7 +35,7 @@ export function CipherCard({ event }: { event: EventMetadata }) {
 
   const submitPasscode = (e: React.FormEvent) => {
     e.preventDefault();
-    if (passcode.toLowerCase() === 'oblivion') {
+    if (passcode.toLowerCase() === 'secret') {
       setDecoded(true);
       setAttemptingDecode(false);
       setError(false);

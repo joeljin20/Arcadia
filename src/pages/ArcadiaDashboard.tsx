@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Terminal, Shield, LogOut, Radio, PackageOpen, Users, MessageSquare, Send, Mic, MicOff, Plus, Trash2, Eye } from 'lucide-react';
+import { Terminal, Shield, LogOut, Radio, PackageOpen, Users, MessageSquare, Send, Mic, MicOff, Plus, Trash2, Eye, Activity } from 'lucide-react';
 import { AuctionLot, EventMetadata, MemberIdentity, DirectMessage } from '../types';
 import { getAuctions, getEvents, generateIdentity, getMembers, getMessages, saveMessage, saveEvent, saveMember, removeMember, deleteMessage } from '../services/mockDB';
 import { AuctionCard } from '../components/AuctionCard';
@@ -8,12 +8,64 @@ import { CipherCard } from '../components/CipherCard';
 import { encodeForumCipher, extractLocation } from '../logic/cipher';
 import { ai } from '../services/gemini';
 
+function MatrixRain() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let width = canvas.width = window.innerWidth;
+    let height = canvas.height = window.innerHeight;
+    let columns = Math.floor(width / 20);
+    const drops: number[] = new Array(columns).fill(0);
+
+    const chars = "0101010101010101ABCDEFHIJKLMNOPQRSTUVWXYZ";
+
+    const draw = () => {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#10b98122';
+      ctx.font = '15px monospace';
+
+      for (let i = 0; i < drops.length; i++) {
+        const text = chars.charAt(Math.floor(Math.random() * chars.length));
+        ctx.fillText(text, i * 20, drops[i] * 20);
+        if (drops[i] * 20 > height && Math.random() > 0.975) {
+          drops[i] = 0;
+        }
+        drops[i]++;
+      }
+    };
+
+    const interval = setInterval(draw, 50);
+    const handleResize = () => {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      columns = Math.floor(width / 20);
+      drops.length = columns;
+      drops.fill(0);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none opacity-20 z-0" />;
+}
+
 export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: () => void; onLogout: () => void }) {
   const [lots, setLots] = useState<AuctionLot[]>([]);
   const [events, setEvents] = useState<EventMetadata[]>([]);
   const [identity, setIdentity] = useState<MemberIdentity | null>(null);
   const [activeTab, setActiveTab] = useState<'INTEL' | 'VAULT' | 'COMMS'>('INTEL');
   const [prophecy, setProphecy] = useState<string>("Aligning the nodes for the next network cycle...");
+  const [displayedProphecy, setDisplayedProphecy] = useState("");
   
   // Intel Input
   const [intelText, setIntelText] = useState("");
@@ -28,6 +80,17 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
   const [messageText, setMessageText] = useState("");
   const [isCreatingNewLink, setIsCreatingNewLink] = useState(false);
   const [newLinkCodename, setNewLinkCodename] = useState("");
+
+  useEffect(() => {
+    let i = 0;
+    setDisplayedProphecy("");
+    const interval = setInterval(() => {
+      setDisplayedProphecy(prophecy.substring(0, i + 1));
+      i++;
+      if (i >= prophecy.length) clearInterval(interval);
+    }, 30);
+    return () => clearInterval(interval);
+  }, [prophecy]);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -65,7 +128,7 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
     async function loadLore() {
       try {
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash-lite",
+          model: 'gemini-1.5-flash',
           contents: "Generate a mysterious, cryptic single-sentence prophecy about a dark, secretive underground hacking network called Arcadia.",
         });
         setProphecy(response.text || "The gavel falls where shadows stretch the longest.");
@@ -118,7 +181,8 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
     const newMember: MemberIdentity = {
         id: "mem_" + Date.now().toString(),
         codename: newLinkCodename,
-        joinDate: Date.now()
+        joinDate: Date.now(),
+        deviceId: "REMOTE"
     };
     saveMember(newMember);
     setMembers(getMembers());
@@ -142,14 +206,17 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
   };
 
   return (
-    <div className="min-h-screen bg-black text-zinc-300 font-mono selection:bg-emerald-900/40 selection:text-emerald-100 crt-effect">
+    <div className="min-h-screen bg-black text-zinc-300 font-mono selection:bg-emerald-900/40 selection:text-emerald-100 crt-effect relative overflow-hidden">
+      <MatrixRain />
       <div className="scanline" />
-      <div className="max-w-7xl mx-auto py-8 md:py-12 px-6 flex flex-col md:flex-row gap-8 md:gap-12">
+      
+      <div className="max-w-7xl mx-auto py-8 md:py-12 px-6 flex flex-col md:flex-row gap-8 md:gap-12 relative z-10">
         {/* Left Sidebar / Nav */}
         <div className="w-full md:w-64 shrink-0 flex flex-col gap-10 border-b border-zinc-900 pb-8 md:pb-0 md:border-b-0 md:border-r pr-6 relative">
           <div className="space-y-4">
-             <div className="w-10 h-10 border border-emerald-900/50 flex items-center justify-center rounded-sm bg-zinc-950 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
-               <Terminal className="w-5 h-5 text-emerald-500" />
+             <div className="w-10 h-10 border border-emerald-900/50 flex items-center justify-center rounded-sm bg-zinc-950 shadow-[0_0_15px_rgba(16,185,129,0.1)] relative overflow-hidden">
+               <Terminal className="w-5 h-5 text-emerald-500 z-10" />
+               <div className="absolute inset-0 bg-emerald-500/5 animate-pulse"></div>
              </div>
              <h2 className="text-2xl font-bold text-zinc-100 tracking-[0.2em] uppercase terminal-text">Arcadia</h2>
              <div className="h-[1px] w-full bg-gradient-to-r from-emerald-900/50 to-transparent my-6"></div>
@@ -169,22 +236,37 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
           <div className="flex flex-row md:flex-col gap-2 overflow-x-auto pb-4 md:pb-0">
             <button 
                 onClick={() => setActiveTab('INTEL')}
-                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'INTEL' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
+                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'INTEL' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
             >
                 <Radio className="w-4 h-4" /> Global Intel
             </button>
             <button 
                 onClick={() => setActiveTab('VAULT')}
-                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'VAULT' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
+                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'VAULT' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
             >
                 <PackageOpen className="w-4 h-4" /> The Vault
             </button>
             <button 
                 onClick={() => setActiveTab('COMMS')}
-                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'COMMS' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
+                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'COMMS' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
             >
                 <MessageSquare className="w-4 h-4" /> Secure Comms
             </button>
+          </div>
+
+          {/* Network Traffic Decorator */}
+          <div className="hidden md:block mt-8 opacity-20 space-y-1">
+             <p className="text-[8px] uppercase tracking-tighter text-emerald-500 mb-2">Network Load</p>
+             <div className="flex gap-0.5 h-8 items-end">
+                {[...Array(20)].map((_, i) => (
+                  <motion.div 
+                    key={i} 
+                    animate={{ height: [Math.random()*100+'%', Math.random()*100+'%', Math.random()*100+'%'] }} 
+                    transition={{ repeat: Infinity, duration: 2+Math.random()*2 }}
+                    className="w-1 bg-emerald-500"
+                  />
+                ))}
+             </div>
           </div>
 
           <div className="mt-auto pt-8 flex flex-col gap-3">
@@ -201,9 +283,15 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
         <div className="flex-1 w-full min-w-0">
           
           {/* LORE NOTICE */}
-          <div className="mb-12 border-l border-emerald-900/50 pl-6 py-2 relative group bg-gradient-to-r from-emerald-950/10 to-transparent">
-             <p className="text-[9px] uppercase text-emerald-600 tracking-[0.3em] mb-2">Network Status</p>
-             <p className="text-lg md:text-xl text-zinc-300 leading-snug">"{prophecy}"</p>
+          <div className="mb-12 border-l border-emerald-900/50 pl-6 py-4 relative group bg-gradient-to-r from-emerald-950/20 to-transparent backdrop-blur-sm border-y border-zinc-900/50">
+             <p className="text-[9px] uppercase text-emerald-600 tracking-[0.3em] mb-2 flex items-center gap-2">
+               <Activity className="w-3 h-3 animate-pulse" /> Network Insight
+             </p>
+             <p className="text-lg md:text-xl text-zinc-300 leading-snug font-mono italic">
+               "{displayedProphecy}
+               {displayedProphecy.length < prophecy.length && <span className="inline-block w-2 h-5 bg-emerald-500 ml-1 animate-pulse" />}
+               "
+             </p>
              <div className="absolute top-0 -left-[1px] w-[2px] h-0 bg-emerald-500 transition-all duration-700 group-hover:h-full shadow-[0_0_10px_rgba(16,185,129,1)]"></div>
           </div>
 
@@ -214,7 +302,14 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
                     <div className="p-16 text-center text-zinc-600 font-mono text-[10px] tracking-[0.2em] uppercase border border-zinc-900 bg-zinc-950/30">No artifacts currently held in the vault.</div>
                   ) : (
                     <div className="grid grid-cols-1 gap-8">
-                       {lots.map(lot => <AuctionCard key={lot.id} lot={lot} />)}
+                       {lots.map(lot => (
+                         <AuctionCard 
+                           key={lot.id} 
+                           lot={lot} 
+                           identity={identity} 
+                           onBidUpdate={() => setLots(getAuctions())} 
+                         />
+                       ))}
                     </div>
                   )}
               </motion.div>

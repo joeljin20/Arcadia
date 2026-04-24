@@ -177,7 +177,7 @@ export function AdminPanel({ onBack }: { onBack: () => void }) {
                     </div>
                     <input 
                       type="text" 
-                      placeholder="Set secret unlock code (e.g. secreto)" 
+                      placeholder="Set secret unlock code (e.g. secret)" 
                       value={decryptionKey}
                       onChange={(e)=>setDecryptionKey(e.target.value)}
                       className="w-full bg-transparent border-none text-white focus:ring-0 px-4 py-4 outline-none font-mono text-lg"

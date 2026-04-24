@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+ml/datasets/
+ml/output/

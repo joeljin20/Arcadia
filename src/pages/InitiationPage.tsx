@@ -7,67 +7,71 @@ import * as mobilenet from '@tensorflow-models/mobilenet';
 import { ai } from '../services/gemini';
 import { playRitualSound, playAccessGranted } from '../services/audio';
 
-// ImageNet class names associated with a ballpoint pen / thin elongated objects.
-// Cast wide — better a false positive than a missed detection in a demo.
-const PEN_KEYWORDS = [
-  'ballpoint', 'ball point', 'biro',
-  'pen,', ' pen ', 'fountain pen', 'felt',
-  'pencil', 'toothbrush', 'crayon', 'marker', 'stylus',
-  'chopstick', 'candle', 'cigarette', 'cigar', 'straw',
-  'ruler', 'rule,', 'letter opener', 'knitting needle',
-  'nail,', 'spike', 'skewer', 'drumstick',
-];
-const COCO_PEN_CLASSES = ['toothbrush'];
+type VisionPrediction = { className: string; probability: number };
 
-// Extract a center-crop canvas from a video frame (boosts pen prominence vs background)
+// "key" (door/house/car key) is not an ImageNet or COCO class, so we use:
+//   1. MobileNet keywords for the closest ImageNet classes (padlock, lock, hook, tools)
+//   2. COCO-SSD scissors/knife — same elongated-metal silhouette as a key
+//   3. COCO bounding-box aspect ratio: keys are 2:1–5:1, which a knife/scissors bbox also matches
+// Thresholds are intentionally low because keys produce weak indirect signals.
+const KEY_MN_KEYWORDS = [
+  'padlock', 'combination lock', ' lock', 'lock,',
+  'hook,', ' hook', 'can opener', 'corkscrew', 'opener',
+  'nail,', ' nail', 'spike', 'bolt,', ' bolt',
+  'chain,', ' chain', 'clasp', 'clip,',
+  'letter opener', 'wrench', 'screwdriver', 'tool,',
+  'blade', 'knife,', 'cleaver',
+];
+
+const COCO_KEY_CLASSES = ['scissors', 'knife'];
+
 function centerCrop(video: HTMLVideoElement, fraction = 0.65): HTMLCanvasElement {
   const size = Math.min(video.videoWidth, video.videoHeight) * fraction;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(
+  canvas.getContext('2d')!.drawImage(
     video,
     (video.videoWidth - size) / 2, (video.videoHeight - size) / 2,
-    size, size,
-    0, 0, size, size,
+    size, size, 0, 0, size, size,
   );
   return canvas;
 }
 
-// Checks MobileNet predictions (full frame + center crop) and COCO detections
-function isPenDetected(
-  fullPreds: { className: string; probability: number }[],
-  cropPreds: { className: string; probability: number }[],
+function isKeyDetected(
+  fullPreds: VisionPrediction[],
+  cropPreds: VisionPrediction[],
   cocoPreds: cocoSsd.DetectedObject[],
 ): boolean {
-  const matchesKeyword = (p: { className: string; probability: number }, threshold: number) =>
-    p.probability >= threshold && PEN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw));
+  const kwMatch = (p: VisionPrediction, t: number) =>
+    p.probability >= t && KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw));
 
-  // Full frame: any top-10 match at 2%+
-  if (fullPreds.some(p => matchesKeyword(p, 0.02))) return true;
-  // Center crop: even looser — 1.5% (pen is more dominant in crop)
-  if (cropPreds.some(p => matchesKeyword(p, 0.015))) return true;
-  // COCO toothbrush (same shape as a pen)
-  if (cocoPreds.some(p => COCO_PEN_CLASSES.includes(p.class) && p.score > 0.35)) return true;
-  // Elongation heuristic: any COCO box with extreme aspect ratio (thin stick shape)
+  if (fullPreds.some(p => kwMatch(p, 0.015))) return true;
+  if (cropPreds.some(p => kwMatch(p, 0.01))) return true;
+  if (cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.30)) return true;
+  // Key-shaped COCO box: elongated (2:1–6:1) with reasonable confidence
   if (cocoPreds.some(p => {
     const [, , w, h] = p.bbox;
-    return Math.max(w / h, h / w) > 5 && p.score > 0.4;
+    const ratio = Math.max(w / h, h / w);
+    return ratio >= 2 && ratio <= 6 && p.score > 0.35;
   })) return true;
   return false;
 }
 
-// Quick single-frame check for the live indicator (no crop, looser threshold)
-function isPenVisibleNow(
-  preds: { className: string; probability: number }[],
+function isKeyVisibleNow(
+  preds: VisionPrediction[],
   cocoPreds: cocoSsd.DetectedObject[],
 ): boolean {
   const kwHit = preds.some(p =>
-    p.probability >= 0.015 && PEN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw))
+    p.probability >= 0.01 && KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw))
   );
-  const cocoHit = cocoPreds.some(p => COCO_PEN_CLASSES.includes(p.class) && p.score > 0.3);
-  return kwHit || cocoHit;
+  const cocoHit = cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.25);
+  const shapeHit = cocoPreds.some(p => {
+    const [, , w, h] = p.bbox;
+    const ratio = Math.max(w / h, h / w);
+    return ratio >= 2 && ratio <= 6 && p.score > 0.30;
+  });
+  return kwHit || cocoHit || shapeHit;
 }
 
 function drawDetections(
@@ -80,24 +84,39 @@ function drawDetections(
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   preds.forEach(pred => {
     const [x, y, w, h] = pred.bbox;
-    const isPen = COCO_PEN_CLASSES.includes(pred.class);
+    const isKey = COCO_KEY_CLASSES.includes(pred.class);
     const alpha = Math.max(0.3, pred.score);
-
-    ctx.strokeStyle = isPen ? `rgba(34,197,94,${alpha})` : `rgba(34,197,94,${alpha * 0.5})`;
-    ctx.lineWidth = isPen ? 2 : 1;
-    ctx.setLineDash(isPen ? [] : [4, 4]);
+    ctx.strokeStyle = isKey ? `rgba(34,197,94,${alpha})` : `rgba(34,197,94,${alpha * 0.5})`;
+    ctx.lineWidth = isKey ? 2 : 1;
+    ctx.setLineDash(isKey ? [] : [4, 4]);
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
-
-    ctx.fillStyle = isPen ? 'rgba(34,197,94,0.85)' : 'rgba(34,197,94,0.5)';
+    ctx.fillStyle = isKey ? 'rgba(34,197,94,0.85)' : 'rgba(34,197,94,0.5)';
     ctx.font = 'bold 11px monospace';
-    const label = `${pred.class.toUpperCase()} ${Math.round(pred.score * 100)}%`;
-    const labelY = y > 18 ? y - 5 : y + h + 14;
-    ctx.fillText(label, x + 2, labelY);
+    ctx.fillText(`${pred.class.toUpperCase()} ${Math.round(pred.score * 100)}%`, x + 2, y > 18 ? y - 5 : y + h + 14);
   });
+}
+
+let mobileNetModelPromise: Promise<mobilenet.MobileNet> | null = null;
+
+async function getMobileNetModel(): Promise<mobilenet.MobileNet> {
+  if (!mobileNetModelPromise) {
+    mobileNetModelPromise = mobilenet.load({ version: 2, alpha: 0.5 });
+  }
+  return mobileNetModelPromise;
+}
+
+async function warmupModel(model: mobilenet.MobileNet) {
+  const warmCanvas = document.createElement('canvas');
+  warmCanvas.width = 224;
+  warmCanvas.height = 224;
+  const ctx = warmCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.fillStyle = '#20242a';
+  ctx.fillRect(0, 0, warmCanvas.width, warmCanvas.height);
+  await model.classify(warmCanvas, 1);
 }
 
 export function InitiationPage({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
@@ -191,40 +210,52 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
   const [analyzing, setAnalyzing] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [catalystVisible, setCatalystVisible] = useState(false);
+  const [keyVisible, setKeyVisible] = useState(false);
   const [liveDetections, setLiveDetections] = useState<cocoSsd.DetectedObject[]>([]);
-  const [penVisible, setPenVisible] = useState(false);
   const [topLabel, setTopLabel] = useState<string>('');
-  const [loadStep, setLoadStep] = useState<string>('Initialising vision engine...');
+  const [loadStep, setLoadStep] = useState<string>('Initializing catalyst scanner...');
+  const [loadNonce, setLoadNonce] = useState(0);
 
-  // Load TF models
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       try {
+        setModelLoadError(false);
+        setModelsReady(false);
         setLoadStep('Loading object detector...');
         const coco = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
         if (cancelled) return;
         cocoRef.current = coco;
-
         setLoadStep('Loading classifier...');
-        const mn = await mobilenet.load({ version: 2, alpha: 0.5 });
+        const mn = await getMobileNetModel();
+        if (cancelled) return;
+        await warmupModel(mn);
         if (cancelled) return;
         mobileNetRef.current = mn;
-
         setModelsReady(true);
+        setLoadStep('Scanner ready');
       } catch {
-        if (!cancelled) setModelLoadError(true);
+        if (!cancelled) {
+          setModelLoadError(true);
+          setLoadStep('Scanner unavailable');
+          mobileNetModelPromise = null;
+        }
       }
     }
     load();
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadNonce]);
 
-  // Camera setup
   useEffect(() => {
     async function setupCamera() {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
+        const s = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 } },
+        });
         streamRef.current = s;
         if (videoRef.current) {
           videoRef.current.srcObject = s;
@@ -236,12 +267,11 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
     }
     setupCamera();
     return () => {
-      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current?.getTracks().forEach((t) => t.stop());
       if (detectionLoopRef.current) clearTimeout(detectionLoopRef.current);
     };
   }, []);
 
-  // Combined COCO + MobileNet live loop — bounding boxes + pen indicator
   useEffect(() => {
     if (!modelsReady || !cameraReady) return;
     let active = true;
@@ -257,11 +287,11 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
           if (!active) return;
           setLiveDetections(cocoPreds);
           drawDetections(canvasRef.current!, videoRef.current, cocoPreds);
-          const detected = isPenVisibleNow(mnPreds, cocoPreds);
-          setPenVisible(detected);
-          // Show top MobileNet label for transparency
-          if (mnPreds.length > 0) setTopLabel(mnPreds[0].className.split(',')[0]);
-        } catch { /* ignore errors during unmount */ }
+          const detected = isKeyVisibleNow(mnPreds, cocoPreds);
+          setKeyVisible(detected);
+          setCatalystVisible(detected || Boolean(mnPreds[0] && mnPreds[0].probability >= 0.18));
+          setTopLabel(mnPreds[0]?.className.split(',')[0] ?? '');
+        } catch { /* ignore intermittent errors */ }
       }
       if (active) detectionLoopRef.current = setTimeout(runLoop, 300);
     }
@@ -273,7 +303,6 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
     };
   }, [modelsReady, cameraReady]);
 
-  // Multi-frame sampling: collect N frames 300 ms apart, classify each (full + crop), succeed if any hits
   const captureAndAnalyze = async () => {
     if (!videoRef.current || analyzing || !modelsReady) return;
     setAnalyzing(true);
@@ -281,10 +310,10 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
     setError(null);
 
     const FRAMES = 4;
-    const FRAME_GAP = 300; // ms between samples
+    const FRAME_GAP = 300;
 
     const progressInterval = setInterval(() => {
-      setScanProgress(prev => {
+      setScanProgress((prev) => {
         if (prev >= 85) { clearInterval(progressInterval); return 85; }
         return prev + 4;
       });
@@ -302,7 +331,7 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
           mobileNetRef.current!.classify(crop as unknown as HTMLVideoElement, 10),
           cocoRef.current!.detect(video),
         ]);
-        if (isPenDetected(fullPreds, cropPreds, cocoPreds)) detected = true;
+        if (isKeyDetected(fullPreds, cropPreds, cocoPreds)) detected = true;
       }
 
       clearInterval(progressInterval);
@@ -314,8 +343,9 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
         if (detected) onSuccess();
         else onFailure();
       }, 450);
-    } catch {
+    } catch (e) {
       clearInterval(progressInterval);
+      console.error('[VisionScanner] error:', e);
       setError('Vision algorithm failed. Please try again.');
       setAnalyzing(false);
       setScanProgress(0);
@@ -338,21 +368,13 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               <span className="bg-gradient-to-r from-emerald-200 to-white bg-clip-text text-transparent">The Alchemist's Gate</span>
               <Sparkles className="text-emerald-500 w-8 h-8" />
             </h2>
-            <p className="text-[10px] tracking-[0.3em] uppercase text-emerald-500/80 font-bold">Hold up your catalyst (a BIC PEN) to access Arcadia</p>
+            <p className="text-[10px] tracking-[0.3em] uppercase text-emerald-500/80 font-bold">Hold up a key (house key, car key) to unseal Arcadia</p>
           </div>
 
-          {/* Camera + canvas overlay */}
           <div className="relative aspect-video bg-black rounded-3xl overflow-hidden border border-white/5 shadow-inner">
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover opacity-80" />
+            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{ objectFit: 'cover' }} />
 
-            {/* Bounding box canvas — sits over the video */}
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              style={{ objectFit: 'cover' }}
-            />
-
-            {/* Corner scan-frame overlay */}
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute top-6 left-6 w-8 h-8 border-t-2 border-l-2 border-emerald-500/60 rounded-tl-lg" />
               <div className="absolute top-6 right-6 w-8 h-8 border-t-2 border-r-2 border-emerald-500/60 rounded-tr-lg" />
@@ -360,14 +382,15 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               <div className="absolute bottom-6 right-6 w-8 h-8 border-b-2 border-r-2 border-emerald-500/60 rounded-br-lg" />
             </div>
 
-            {/* Model loading overlay */}
             {!isReady && !modelLoadError && (
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4 backdrop-blur-sm">
                 <Cpu className="w-8 h-8 text-emerald-400 animate-pulse" />
                 <p className="text-[10px] text-emerald-400 uppercase tracking-[0.3em] font-mono font-bold">{loadStep}</p>
                 <div className="flex gap-1">
-                  {[0, 1, 2].map(i => (
-                    <motion.div key={i} className="w-1.5 h-1.5 bg-emerald-500 rounded-full"
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="w-1.5 h-1.5 bg-emerald-500 rounded-full"
                       animate={{ opacity: [0.3, 1, 0.3] }}
                       transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
                     />
@@ -376,15 +399,18 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               </div>
             )}
 
-            {/* Model load error */}
             {modelLoadError && (
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-3">
-                <p className="text-red-400 text-xs font-mono uppercase tracking-widest">Vision engine failed to load</p>
-                <p className="text-slate-500 text-[10px]">Use the dev override below</p>
+                <p className="text-red-400 text-xs font-mono uppercase tracking-widest">Scanner failed to initialize</p>
+                <button
+                  onClick={() => setLoadNonce((n) => n + 1)}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-full text-[10px] font-bold uppercase tracking-widest backdrop-blur-md transition-colors border border-white/20"
+                >
+                  Retry Scanner
+                </button>
               </div>
             )}
 
-            {/* Scan progress overlay */}
             {analyzing && (
               <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-white space-y-6 backdrop-blur-md px-12">
                 <p className="text-[10px] text-emerald-400 uppercase tracking-[0.3em] font-mono font-bold">Scanning Catalyst...</p>
@@ -404,22 +430,20 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               </div>
             )}
 
-            {/* Live pen detection indicator */}
             {isReady && !analyzing && (
-              <div className={`absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 rounded-full border transition-all duration-500 ${penVisible ? 'bg-emerald-950/90 border-emerald-500/50' : 'bg-black/60 border-white/10'}`}>
-                <div className={`w-1.5 h-1.5 rounded-full transition-colors ${penVisible ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
-                <span className={`text-[10px] font-mono uppercase tracking-widest font-bold transition-colors ${penVisible ? 'text-emerald-400' : 'text-slate-500'}`}>
-                  {penVisible ? 'Catalyst Detected' : topLabel ? topLabel : 'Awaiting Catalyst...'}
+              <div className={`absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 rounded-full border transition-all duration-500 ${keyVisible ? 'bg-emerald-950/90 border-emerald-500/50' : catalystVisible ? 'bg-emerald-950/40 border-emerald-500/30' : 'bg-black/60 border-white/10'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full transition-colors ${keyVisible ? 'bg-emerald-400 animate-pulse' : catalystVisible ? 'bg-emerald-500/80' : 'bg-slate-600'}`} />
+                <span className={`text-[10px] font-mono uppercase tracking-widest font-bold transition-colors ${keyVisible ? 'text-emerald-400' : catalystVisible ? 'text-emerald-300' : 'text-slate-500'}`}>
+                  {keyVisible ? 'Catalyst Detected' : catalystVisible ? 'Object Present' : topLabel ? topLabel : 'Awaiting Catalyst...'}
                 </span>
               </div>
             )}
           </div>
 
-          {/* Live detection labels */}
           {isReady && !analyzing && liveDetections.length > 0 && (
             <div className="flex flex-wrap gap-2 justify-center">
               {liveDetections.slice(0, 5).map((d, i) => (
-                <span key={i} className={`text-[9px] font-mono uppercase tracking-widest px-2 py-1 rounded border ${COCO_PEN_CLASSES.includes(d.class) ? 'text-emerald-400 border-emerald-500/40 bg-emerald-950/60' : 'text-slate-500 border-slate-700/40 bg-slate-900/40'}`}>
+                <span key={i} className={`text-[9px] font-mono uppercase tracking-widest px-2 py-1 rounded border ${COCO_KEY_CLASSES.includes(d.class) ? 'text-emerald-400 border-emerald-500/40 bg-emerald-950/60' : 'text-slate-500 border-slate-700/40 bg-slate-900/40'}`}>
                   {d.class} {Math.round(d.score * 100)}%
                 </span>
               ))}
@@ -438,7 +462,9 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
             className="w-full py-5 bg-emerald-600/90 text-white rounded-full font-bold uppercase tracking-[0.2em] shadow-[0_10px_30px_rgb(16,185,129,0.3)] flex items-center justify-center gap-3 hover:bg-emerald-500 transition-all hover:-translate-y-1 hover:shadow-[0_20px_40px_rgb(16,185,129,0.4)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 text-sm border border-emerald-500/50"
           >
             <Camera className="w-5 h-5" />
-            <span>{!isReady ? 'Loading Vision Engine...' : 'Present Catalyst'}</span>
+            <span>
+              {!isReady ? 'Initializing Scanner...' : 'Present Catalyst'}
+            </span>
           </button>
 
           <button onClick={onSuccess} className="w-full py-3 bg-transparent text-emerald-500/50 hover:text-emerald-400 rounded-full font-bold uppercase tracking-[0.2em] text-[10px] transition-colors border border-transparent hover:border-emerald-500/30">

@@ -73,8 +73,8 @@ State flow is managed in `src/App.tsx`:
 
 ### Optional Backend Helper
 
-- `server.ts` (Express + Google Cloud Vision)
-- Provides `/api/vision/bic-pen` endpoint for robust vision verification path
+- `server.ts` (Express utility service)
+- Provides `/api/health` only; initiation artefact verification runs in-browser with TensorFlow.js
 
 ## Technologies Used
 
@@ -85,7 +85,7 @@ State flow is managed in `src/App.tsx`:
 - `motion/react`
 - Lucide React icons
 - Google Gemini (`@google/genai`)
-- Google Cloud Vision (`@google-cloud/vision`)
+- TensorFlow.js (`@tensorflow/tfjs`, `@tensorflow-models/coco-ssd`, `@tensorflow-models/mobilenet`)
 - Express + CORS (optional local API helper)
 
 ## Setup Instructions
@@ -111,10 +111,9 @@ Minimum key:
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 ```
 
-Optional backend Vision helper keys:
+Optional backend helper keys:
 
 ```env
-GOOGLE_APPLICATION_CREDENTIALS="/absolute/path/to/service-account.json"
 BACKEND_PORT=3001
 ```
 
@@ -126,7 +125,7 @@ npm run dev
 
 Frontend runs on `http://localhost:3000`.
 
-### 4) Run optional backend Vision helper (second terminal)
+### 4) Run optional backend helper (second terminal)
 
 ```bash
 npx tsx server.ts
@@ -140,6 +139,29 @@ Backend runs on `http://localhost:3001`.
 npm run lint
 npm run build
 ```
+
+### 6) Train custom key model (recommended for production reliability)
+
+```bash
+npm run ml:deps
+npm run ml:train:key
+```
+
+If your local Python is not 3.11-compatible for TensorFlow conversion, use Docker:
+
+```bash
+npm run ml:train:key:docker
+```
+
+Dataset format:
+
+```text
+ml/datasets/
+  key/
+  not_key/
+```
+
+Full training guide: [`ml/README.md`](ml/README.md)
 
 ## API Usage Overview
 
@@ -163,8 +185,9 @@ Used for:
 
 Paths:
 
-- primary: browser/model-assisted flow in app
-- optional hardened path: `POST /api/vision/bic-pen` via `server.ts`
+- primary: in-browser TensorFlow.js model-assisted flow (`coco-ssd` + `mobilenet`)
+- production path: custom trained TF model auto-loaded from `public/models/key_classifier/model.json`
+- backend helper not required for vision verification
 
 Fallback:
 
@@ -242,6 +265,11 @@ src/
   index.css
   main.tsx
 server.ts
+ml/
+  Dockerfile
+  README.md
+  train_key_classifier.py
+  train_key_classifier_docker.sh
 README.md
 ```
 

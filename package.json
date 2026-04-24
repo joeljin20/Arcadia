@@ -8,10 +8,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "ml:deps": "python3 -m pip install -r ml/requirements.txt",
+    "ml:train:key": "python3 ml/train_key_classifier.py",
+    "ml:train:key:docker": "bash ml/train_key_classifier_docker.sh"
   },
   "dependencies": {
-    "@google-cloud/vision": "^5.3.5",
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@tensorflow-models/coco-ssd": "^2.2.3",

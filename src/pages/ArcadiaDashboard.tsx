@@ -21,26 +21,71 @@ function MatrixRain() {
     let height = canvas.height = window.innerHeight;
     let columns = Math.floor(width / 20);
     const drops: number[] = new Array(columns).fill(0);
+    const baseChars = "0101010101010101ABCDEFHIJKLMNOPQRSTUVWXYZ";
+    const arcadiaChars = "⍙⍦⎈⎉⎊⍝⍧⍨⍩⍪⍫⍬⍭⍮⍯⍰⍱⍲⍳⍴⍵⍶⍷⍸⍹◴◵◶◷◰◱◲◳◨◩";
+    const chars = `${baseChars}${arcadiaChars}`;
+    const ripples: Array<{ x: number; y: number; radius: number; life: number }> = [];
+    let frameId = 0;
+    let pulseUntil = 0;
+    let nextPulse = performance.now() + 9000 + Math.random() * 6000;
 
-    const chars = "0101010101010101ABCDEFHIJKLMNOPQRSTUVWXYZ";
+    const draw = (time: number) => {
+      const isPulse = time < pulseUntil;
+      const shade = isPulse ? 0.028 : 0.05;
+      const baseAlpha = isPulse ? 0.32 : 0.14;
 
-    const draw = () => {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+      ctx.fillStyle = `rgba(0, 0, 0, ${shade})`;
       ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = '#10b98122';
       ctx.font = '15px monospace';
 
       for (let i = 0; i < drops.length; i++) {
-        const text = chars.charAt(Math.floor(Math.random() * chars.length));
-        ctx.fillText(text, i * 20, drops[i] * 20);
+        const charIndex = Math.floor(Math.random() * chars.length);
+        const text = chars.charAt(charIndex);
+        const x = i * 20;
+        const y = drops[i] * 20;
+        let rippleBoost = 0;
+        for (let r = 0; r < ripples.length; r += 1) {
+          const ripple = ripples[r];
+          const dx = ripple.x - x;
+          const dy = ripple.y - y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < ripple.radius) {
+            rippleBoost = Math.max(rippleBoost, (1 - distance / ripple.radius) * 0.45);
+          }
+        }
+        ctx.fillStyle = `rgba(16, 185, 129, ${Math.min(0.95, baseAlpha + rippleBoost)})`;
+        ctx.fillText(text, x, y);
+
         if (drops[i] * 20 > height && Math.random() > 0.975) {
           drops[i] = 0;
         }
-        drops[i]++;
+        drops[i] += 1;
       }
+
+      for (let i = ripples.length - 1; i >= 0; i -= 1) {
+        const ripple = ripples[i];
+        ripple.radius += 8;
+        ripple.life -= 0.018;
+        if (ripple.life <= 0) {
+          ripples.splice(i, 1);
+          continue;
+        }
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(52, 211, 153, ${ripple.life * 0.32})`;
+        ctx.lineWidth = 2;
+        ctx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      if (time >= nextPulse) {
+        pulseUntil = time + 2000;
+        nextPulse = time + 10000 + Math.random() * 5000;
+      }
+
+      frameId = window.requestAnimationFrame(draw);
     };
 
-    const interval = setInterval(draw, 50);
+    frameId = window.requestAnimationFrame(draw);
     const handleResize = () => {
       width = canvas.width = window.innerWidth;
       height = canvas.height = window.innerHeight;
@@ -48,11 +93,16 @@ function MatrixRain() {
       drops.length = columns;
       drops.fill(0);
     };
+    const handlePointerDown = (event: PointerEvent) => {
+      ripples.push({ x: event.clientX, y: event.clientY, radius: 20, life: 1 });
+    };
 
     window.addEventListener('resize', handleResize);
+    window.addEventListener('pointerdown', handlePointerDown);
     return () => {
-      clearInterval(interval);
+      window.cancelAnimationFrame(frameId);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('pointerdown', handlePointerDown);
     };
   }, []);
 

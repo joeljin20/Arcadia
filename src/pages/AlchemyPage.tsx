@@ -606,10 +606,14 @@ export function AlchemyPage({ onTriggerArcadia, searchVisible }: { onTriggerArca
           {isEnergyMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
           {isEnergyMuted ? 'Energy Sound Off' : 'Energy Sound On'}
         </button>
-        {categories.map((cat) => (
-          <button
+        {categories.map((cat, index) => (
+          <motion.button
             key={cat}
+            layout
             onClick={() => setActiveCategory(cat)}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, delay: index * 0.025 }}
             className={`px-5 py-2.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all shadow-sm ${
               activeCategory === cat
                 ? 'bg-emerald-900 text-white shadow-emerald-900/20'
@@ -617,7 +621,7 @@ export function AlchemyPage({ onTriggerArcadia, searchVisible }: { onTriggerArca
             }`}
           >
             {cat}
-          </button>
+          </motion.button>
         ))}
       </div>
 
@@ -637,12 +641,13 @@ export function AlchemyPage({ onTriggerArcadia, searchVisible }: { onTriggerArca
             gap: `${bubbleMetrics.gap}px`,
             padding: `${bubbleMetrics.padding}px`,
           }}
-          key={`${bubbleMetrics.columns}-${bubbleMetrics.cardHeight}-${bubbleMetrics.gap}-${bubbleMetrics.padding}`}
+          key={`${bubbleMetrics.columns}-${bubbleMetrics.cardHeight}-${bubbleMetrics.gap}-${bubbleMetrics.padding}-${activeCategory}-${searchQuery.trim().toLowerCase()}`}
           onMouseEnter={() => setIsGridHovered(true)}
           onMouseLeave={() => setIsGridHovered(false)}
           className="relative w-full overflow-hidden rounded-[2rem] border border-slate-200/50 bg-white/35 backdrop-blur-sm grid grid-flow-row-dense"
         >
-          {activeBubbleSlots.map((slot, slotIndex) => {
+          <AnimatePresence mode="popLayout">
+            {activeBubbleSlots.map((slot, slotIndex) => {
             const entry = recipeBySlot[slotIndex];
             if (!entry) {
               return null;
@@ -686,8 +691,11 @@ export function AlchemyPage({ onTriggerArcadia, searchVisible }: { onTriggerArca
                 key={cardKey}
                 variants={{
                   hidden: { opacity: 0, y: 12 },
-                  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 230, damping: 24 } },
+                  show: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 230, damping: 24 } },
                 }}
+                initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8, scale: 0.96, transition: { duration: 0.2 } }}
                 style={spanStyle}
                 className={`min-w-0 min-h-0 ${isFeaturedSlot ? 'z-10' : 'z-0'}`}
                 transition={{ type: 'spring', stiffness: 180, damping: 28, mass: 0.9 }}
@@ -696,6 +704,7 @@ export function AlchemyPage({ onTriggerArcadia, searchVisible }: { onTriggerArca
               </motion.div>
             );
           })}
+          </AnimatePresence>
         </motion.div>
       ) : (
         <div className="h-[400px] flex items-center justify-center">
@@ -716,7 +725,7 @@ export function AlchemyPage({ onTriggerArcadia, searchVisible }: { onTriggerArca
             className="relative max-w-2xl mx-auto w-full mb-8"
           >
             <div className="absolute inset-0 bg-white/40 blur-xl rounded-full z-0 pointer-events-none" />
-            <div className="relative z-10">
+            <div className="relative z-10 alchemy-search-shell rounded-full">
               <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-700/60" />
               <input
                 type="text"

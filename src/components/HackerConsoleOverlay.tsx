@@ -89,8 +89,35 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
   const [typedValidationState, setTypedValidationState] = useState<InputValidationState>('IDLE');
   const [typedValidationMessage, setTypedValidationMessage] = useState('');
   const timeoutRefs = useRef<number[]>([]);
+  const logDumpRef = useRef<HTMLDivElement | null>(null);
+
+  const dataColumns = useMemo(() => {
+    return Array.from({ length: 14 }, (_, idx) => {
+      const len = 64 + Math.floor(Math.random() * 28);
+      const stream = Array.from({ length: len }, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join(' ');
+      return {
+        id: idx,
+        stream,
+        duration: 12 + Math.random() * 10,
+        delay: Math.random() * 6,
+      };
+    });
+  }, []);
 
   const expectedRemaining = useMemo(() => NUMBER_SEQUENCE.slice(currentIndex), [currentIndex]);
+  const logLines = useMemo(() => {
+    const lines = [
+      '> SOURCE: The_Obsidian_Cipher_Torte.blog',
+      '> NODE_GRID: [1..16]',
+      `> REQUIRED_SEQUENCE: [${NUMBER_SEQUENCE.join(', ')}]`,
+      `> CURRENT_INPUT: [${selectedNumbers.join(', ')}]`,
+      `> REMAINING: [${expectedRemaining.join(', ')}]`,
+    ];
+    if (status === 'BREACHED') {
+      lines.push('>> ACCESS_GRANTED // PAYLOAD_UNLOCKED', '>> ET IN ARCADIA EGO');
+    }
+    return lines;
+  }, [expectedRemaining, selectedNumbers, status]);
 
   const clearScheduledTimeouts = () => {
     timeoutRefs.current.forEach((id) => window.clearTimeout(id));
@@ -132,6 +159,16 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
       clearScheduledTimeouts();
     };
   }, []);
+
+  useEffect(() => {
+    if (!logDumpRef.current) {
+      return;
+    }
+    logDumpRef.current.scrollTo({
+      top: logDumpRef.current.scrollHeight,
+      behavior: 'smooth',
+    });
+  }, [logLines, terminalMessage]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -287,6 +324,24 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
             exit={{ y: 24, scale: 0.98 }}
             className="relative w-full max-w-6xl h-[88vh] border border-[#22c55e]/40 bg-black shadow-[0_0_40px_rgba(34,197,94,0.25)] overflow-hidden"
           >
+            <div className="absolute inset-0 opacity-[0.05] pointer-events-none overflow-hidden">
+              {dataColumns.map((column) => (
+                <motion.div
+                  key={column.id}
+                  className="absolute top-0 text-[9px] leading-5 font-mono text-[#22c55e]/70 whitespace-nowrap"
+                  style={{ left: `${(column.id / dataColumns.length) * 100}%` }}
+                  animate={{ y: ['-110%', '110%'] }}
+                  transition={{
+                    duration: column.duration,
+                    repeat: Infinity,
+                    ease: 'linear',
+                    delay: column.delay,
+                  }}
+                >
+                  {column.stream}
+                </motion.div>
+              ))}
+            </div>
             <div className="absolute inset-0 bg-gradient-to-b from-[#22c55e]/5 to-transparent pointer-events-none" />
 
             <div className="relative z-10 h-full flex flex-col">
@@ -326,7 +381,7 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                           type="button"
                           onClick={() => handleNumberClick(num)}
                           disabled={status === 'LOCKED' || status === 'BREACHED'}
-                          className={`number-circle h-12 md:h-14 rounded-full border text-xs md:text-sm font-bold ${
+                          className={`number-circle hacker-grid-cell-subdivide h-12 md:h-14 rounded-full border text-xs md:text-sm font-bold ${
                             isWrong
                               ? 'wrong'
                               : isSelected
@@ -386,11 +441,19 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                       </div>
                       <span>{integrity}%</span>
                     </div>
-                    <div className="h-2 border border-[#22c55e]/35 bg-[#031005] overflow-hidden">
-                      <motion.div
-                        animate={{ width: `${integrity}%` }}
-                        className={`h-full ${integrityError ? 'bg-red-500' : 'bg-[#22c55e] shadow-[0_0_12px_rgba(34,197,94,0.8)]'}`}
-                      />
+                    <div className="h-2.5 border border-[#22c55e]/35 bg-[#031005] overflow-hidden px-1 py-[2px] grid grid-cols-10 gap-1">
+                      {Array.from({ length: 10 }, (_, index) => {
+                        const isActive = index < Math.round(integrity / 10);
+                        return (
+                          <motion.span
+                            key={`integrity-segment-${index}`}
+                            className={`integrity-segment ${integrityError ? 'error' : isActive ? 'active' : ''}`}
+                            initial={false}
+                            animate={{ opacity: isActive ? 1 : 0.65, scaleY: isActive ? 1 : 0.92 }}
+                            transition={{ duration: 0.16 }}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 </section>
@@ -398,18 +461,18 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                 <section className="border border-[#22c55e]/30 bg-[#050505] p-4 md:p-5 flex flex-col min-h-0">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-[#22c55e]/80 mb-3">Log_Dump</p>
 
-                  <div className="flex-1 overflow-y-auto text-[11px] space-y-1 leading-relaxed pr-1">
-                    <p>&gt; SOURCE: The_Obsidian_Cipher_Torte.blog</p>
-                    <p>&gt; NODE_GRID: [1..16]</p>
-                    <p>&gt; REQUIRED_SEQUENCE: [{NUMBER_SEQUENCE.join(', ')}]</p>
-                    <p>&gt; CURRENT_INPUT: [{selectedNumbers.join(', ')}]</p>
-                    <p>&gt; REMAINING: [{expectedRemaining.join(', ')}]</p>
-                    {status === 'BREACHED' ? (
-                      <>
-                        <p className="text-[#22c55e] mt-3">&gt;&gt; ACCESS_GRANTED // PAYLOAD_UNLOCKED</p>
-                        <p className="text-[#22c55e] font-bold text-sm mt-3 tracking-widest animate-pulse">&gt;&gt; ET IN ARCADIA EGO</p>
-                      </>
-                    ) : null}
+                  <div ref={logDumpRef} className="flex-1 overflow-y-auto text-[11px] space-y-1 leading-relaxed pr-1">
+                    {logLines.map((line, index) => (
+                      <motion.p
+                        key={`${line}-${index}`}
+                        initial={{ opacity: 0, y: 3 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className={line.startsWith('>>') ? 'text-[#22c55e] font-bold tracking-widest' : ''}
+                      >
+                        {line}
+                      </motion.p>
+                    ))}
                   </div>
 
                   <footer className="pt-4 mt-4 border-t border-[#22c55e]/20 flex items-center justify-between text-[10px] text-[#22c55e]/70">

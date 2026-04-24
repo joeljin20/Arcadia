@@ -1,3 +1,4 @@
+import { type MouseEvent } from 'react';
 import { motion } from 'motion/react';
 import { Utensils } from 'lucide-react';
 import { Recipe } from '../types';
@@ -23,20 +24,40 @@ export function RecipeCard({
   onHiddenHoverChange,
   onCardHoverChange,
 }: RecipeCardProps) {
+  const updateParallax = (event: MouseEvent<HTMLElement>) => {
+    const target = event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const nx = (event.clientX - rect.left) / rect.width - 0.5;
+    const ny = (event.clientY - rect.top) / rect.height - 0.5;
+    target.style.setProperty('--card-parallax-x', `${(-nx * 12).toFixed(2)}px`);
+    target.style.setProperty('--card-parallax-y', `${(-ny * 10).toFixed(2)}px`);
+  };
+
+  const resetParallax = (event: MouseEvent<HTMLElement>) => {
+    const target = event.currentTarget;
+    target.style.setProperty('--card-parallax-x', '0px');
+    target.style.setProperty('--card-parallax-y', '0px');
+  };
+
   if (isFeatured) {
     return (
       <motion.div
         layoutId={`card-${recipe.id}`}
         onClick={onClick}
+        onMouseMove={updateParallax}
         onMouseEnter={() => onCardHoverChange?.(true)}
-        onMouseLeave={() => onCardHoverChange?.(false)}
-        className="h-full bento-card p-7 md:p-10 lg:p-12 flex flex-col justify-end relative overflow-hidden group cursor-pointer border-emerald-500/25 bg-[#0b1111] hover:border-emerald-300/60 transition-all hover:shadow-[0_24px_70px_rgb(0,0,0,0.28)] hover:-translate-y-1"
+        onMouseLeave={(event) => {
+          resetParallax(event);
+          onCardHoverChange?.(false);
+        }}
+        className="h-full bento-card recipe-card-interactive p-7 md:p-10 lg:p-12 flex flex-col justify-end relative overflow-hidden group cursor-pointer border-emerald-500/25 bg-[#0b1111] hover:border-emerald-300/60 transition-all hover:shadow-[0_28px_80px_rgb(0,0,0,0.35)] hover:-translate-y-1.5"
       >
         <div className={`recipe-orb ${orbActive ? 'recipe-orb-active' : ''}`}>
           <Utensils className="w-4 h-4" />
         </div>
         <div className="absolute inset-0 z-0 pointer-events-none">
-          <img src={recipe.image} className="w-full h-full object-cover opacity-88 transition-all duration-700 group-hover:scale-105" alt="" />
+          <img src={recipe.image} className="recipe-parallax-image w-full h-full object-cover opacity-88 transition-all duration-700 group-hover:scale-[1.08]" alt="" />
           <div className="absolute inset-0 bg-[#020706]/40" />
           <div className="absolute inset-0 bg-[radial-gradient(100%_140%_at_80%_10%,rgba(16,185,129,0.14),transparent_60%)]" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#020705]/92 via-[#05110d]/70 to-[#020705]/30" />
@@ -61,14 +82,16 @@ export function RecipeCard({
   if (isHidden) {
     return (
       <div
-        className={`h-full p-[2px] rounded-[2rem] relative overflow-hidden secret-beam-outer ${
+        className={`h-full p-[2px] rounded-[2rem] relative overflow-hidden secret-beam-outer recipe-card-interactive ${
           energyPaused ? 'energy-paused' : ''
         }`}
+        onMouseMove={updateParallax}
         onMouseEnter={() => {
           onHiddenHoverChange?.(true);
           onCardHoverChange?.(true);
         }}
-        onMouseLeave={() => {
+        onMouseLeave={(event) => {
+          resetParallax(event);
           onHiddenHoverChange?.(false);
           onCardHoverChange?.(false);
         }}
@@ -92,7 +115,7 @@ export function RecipeCard({
         <motion.div
           layoutId={`card-${recipe.id}`}
           onClick={onClick}
-          className="relative h-full rounded-[calc(2rem-2px)] bg-white shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-8 flex flex-col group cursor-pointer transition-all overflow-hidden hover:-translate-y-1 hover:shadow-[0_20px_50px_rgb(0,0,0,0.06)]"
+          className="relative h-full rounded-[calc(2rem-2px)] bg-white shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-8 flex flex-col group cursor-pointer transition-all overflow-hidden hover:-translate-y-1.5 hover:shadow-[0_22px_58px_rgb(0,0,0,0.11)]"
         >
           <div className="relative z-10 flex flex-col h-full p-2 -m-2 rounded-2xl transition-all bg-white/60 backdrop-blur-[2px] group-hover:bg-transparent group-hover:backdrop-blur-none">
             <div className="flex justify-between items-start mb-5">
@@ -115,7 +138,7 @@ export function RecipeCard({
           </div>
           <img
             src={recipe.image}
-            className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 opacity-0 group-hover:opacity-[0.08] grayscale mix-blend-multiply"
+            className="recipe-parallax-image absolute inset-0 w-full h-full object-cover transition-opacity duration-700 opacity-0 group-hover:opacity-[0.12] grayscale mix-blend-multiply"
             alt=""
           />
         </motion.div>
@@ -128,9 +151,13 @@ export function RecipeCard({
     <motion.div
       layoutId={`card-${recipe.id}`}
       onClick={onClick}
+      onMouseMove={updateParallax}
       onMouseEnter={() => onCardHoverChange?.(true)}
-      onMouseLeave={() => onCardHoverChange?.(false)}
-      className="h-full bento-card p-6 md:p-7 flex flex-col group cursor-pointer transition-all hover:-translate-y-1 relative overflow-hidden hover:border-emerald-200 hover:shadow-[0_20px_50px_rgb(0,0,0,0.06)]"
+      onMouseLeave={(event) => {
+        resetParallax(event);
+        onCardHoverChange?.(false);
+      }}
+      className="h-full bento-card recipe-card-interactive p-6 md:p-7 flex flex-col group cursor-pointer transition-all hover:-translate-y-1.5 relative overflow-hidden hover:border-emerald-200 hover:shadow-[0_20px_54px_rgb(0,0,0,0.1)]"
     >
       <div className="relative z-10 flex flex-col h-full p-2 -m-2 rounded-2xl transition-all bg-white/60 backdrop-blur-[2px] group-hover:bg-transparent group-hover:backdrop-blur-none">
         <div className="flex justify-between items-start mb-5">
@@ -153,7 +180,7 @@ export function RecipeCard({
       </div>
       <img
         src={recipe.image}
-        className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 opacity-0 group-hover:opacity-[0.08] grayscale mix-blend-multiply"
+        className="recipe-parallax-image absolute inset-0 w-full h-full object-cover transition-opacity duration-700 opacity-0 group-hover:opacity-[0.14] grayscale mix-blend-multiply"
         alt=""
       />
     </motion.div>

@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { ChevronLeft, Clock, Users, Flame, Utensils, Award, Lock } from 'lucide-react';
 import { Recipe } from '../types';
 import { NUMBER_SEQUENCE } from '../config/constants';
 
 const CIPHER_SET = new Set(NUMBER_SEQUENCE);
+const CIPHER_POSITION = new Map(NUMBER_SEQUENCE.map((value, index) => [value, index + 1]));
 
 function IngredientText({ ing, isSecret }: { ing: string; isSecret: boolean }) {
   if (!isSecret) {
@@ -20,11 +22,17 @@ function IngredientText({ ing, isSecret }: { ing: string; isSecret: boolean }) {
   const spaceIdx = ing.indexOf(' ');
   const quantity = ing.slice(0, spaceIdx);
   const rest = ing.slice(spaceIdx);
+  const position = CIPHER_POSITION.get(num);
 
   return (
-    <span className="leading-relaxed font-medium">
-      <span className="text-emerald-500 font-bold cipher-pulse">{quantity}</span>
+    <span className="leading-relaxed font-medium ingredient-cipher-highlight group relative inline-flex items-center flex-wrap">
+      <span className="text-emerald-600 font-bold cipher-pulse border-b border-emerald-400/55 border-dotted cursor-help">{quantity}</span>
       <span className="text-slate-700">{rest}</span>
+      {position ? (
+        <span className="pointer-events-none absolute -top-8 left-0 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] tracking-wide uppercase bg-[#061106] text-emerald-200 border border-emerald-400/35 rounded-full px-2.5 py-1 whitespace-nowrap shadow-[0_8px_18px_rgba(0,0,0,0.24)]">
+          Position {position} of {NUMBER_SEQUENCE.length}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -41,6 +49,22 @@ export function RecipeDetail({
   onInitiateDecryption?: () => void;
 }) {
   const isSecret = recipe.id === 'obsidian_cipher_torte';
+  const [heroOffset, setHeroOffset] = useState(0);
+
+  useEffect(() => {
+    const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reducedMotionQuery.matches) {
+      return;
+    }
+    const updateParallax = () => {
+      setHeroOffset(Math.min(48, window.scrollY * 0.08));
+    };
+    updateParallax();
+    window.addEventListener('scroll', updateParallax, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', updateParallax);
+    };
+  }, []);
 
   return (
     <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-20}} className="w-full pb-16">
@@ -52,7 +76,12 @@ export function RecipeDetail({
       </button>
 
       <div className="w-full h-[350px] md:h-[500px] rounded-[2rem] overflow-hidden relative mb-12 shadow-2xl">
-        <img src={recipe.image} className="w-full h-full object-cover" alt={recipe.title} />
+        <img
+          src={recipe.image}
+          className="w-full h-full object-cover transition-transform duration-300"
+          style={{ transform: `translate3d(0, ${heroOffset}px, 0) scale(1.08)` }}
+          alt={recipe.title}
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-[#111827]/90 via-[#111827]/30 to-transparent flex flex-col justify-end p-8 md:p-16">
           <motion.span initial={{opacity:0, x:-20}} animate={{opacity:1, x:0}} transition={{delay: 0.2}} className="text-emerald-400 font-bold tracking-widest uppercase text-[10px] md:text-xs mb-4">
             {recipe.category}
@@ -119,7 +148,14 @@ export function RecipeDetail({
           <h3 className="text-3xl font-serif font-bold text-slate-900 mb-10 tracking-tight">The Alchemical Process</h3>
           <div className="space-y-12">
             {recipe.steps.map((step, idx) => (
-              <div key={idx} className="flex gap-6 md:gap-8 group">
+              <motion.div
+                key={idx}
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.4 }}
+                transition={{ duration: 0.36, delay: idx * 0.06 }}
+                className="flex gap-6 md:gap-8 group"
+              >
                 <div className="shrink-0 flex flex-col items-center">
                   <div className="w-12 h-12 rounded-full border-2 border-emerald-200 bg-white flex items-center justify-center text-emerald-700 font-serif font-bold text-xl group-hover:bg-emerald-600 group-hover:text-white group-hover:border-emerald-600 transition-all shadow-sm">
                     {idx + 1}
@@ -131,7 +167,7 @@ export function RecipeDetail({
                 <div className="pb-4 pt-2">
                   <p className="text-slate-700 text-lg md:text-xl leading-relaxed font-serif">{step}</p>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
 

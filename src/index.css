@@ -17,6 +17,22 @@
   @apply bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300;
 }
 
+.recipe-card-interactive {
+  --card-parallax-x: 0px;
+  --card-parallax-y: 0px;
+  transform: translateZ(0);
+}
+
+.recipe-parallax-image {
+  transform: translate3d(var(--card-parallax-x), var(--card-parallax-y), 0) scale(var(--card-scale, 1.02));
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.recipe-card-interactive:hover .recipe-parallax-image {
+  --card-scale: 1.1;
+}
+
 .markdown-body {
   @apply font-serif;
 }
@@ -75,7 +91,7 @@
 
 /* Terminal text glow */
 .terminal-text {
-  text-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+  text-shadow: 0 0 5px rgba(34, 197, 94, 0.48), 0 0 10px rgba(34, 197, 94, 0.22);
 }
 
 .terminal-text-red {
@@ -131,12 +147,12 @@
   overflow: hidden;
   border-right: 2px solid #22c55e;
   white-space: nowrap;
-  animation: blink 0.75s step-end infinite;
+  animation: cursor-chaos 1.6s steps(1, end) infinite;
 }
 
-@keyframes blink {
-  from, to { border-color: transparent; }
-  50% { border-color: #22c55e; }
+@keyframes cursor-chaos {
+  0%, 9%, 19%, 31%, 47%, 60%, 78%, 90%, 100% { border-color: #22c55e; }
+  10%, 20%, 32%, 48%, 61%, 79%, 91% { border-color: transparent; }
 }
 
 /* Hacker Terminal Text */
@@ -261,6 +277,7 @@
   justify-content: center;
   pointer-events: none;
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+  animation: orb-float 4s ease-in-out infinite;
 }
 
 .recipe-orb-inline {
@@ -279,6 +296,74 @@
     0 0 0 1px rgba(16, 185, 129, 0.14),
     0 3px 14px rgba(16, 185, 129, 0.2);
   transform: none;
+}
+
+.recipe-card-interactive:hover .recipe-orb,
+.recipe-orb:hover {
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.22),
+    0 0 18px rgba(16, 185, 129, 0.25),
+    0 0 24px rgba(34, 211, 238, 0.15);
+}
+
+.alchemy-search-shell {
+  transition: box-shadow 240ms ease, transform 240ms ease;
+}
+
+.alchemy-search-shell:focus-within {
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.35),
+    0 0 24px rgba(16, 185, 129, 0.24),
+    0 0 44px rgba(34, 211, 238, 0.16);
+  animation: search-focus-pulse 1.8s ease-in-out infinite;
+}
+
+.hacker-grid-cell-subdivide {
+  border-right: 1px dashed rgba(34, 197, 94, 0.18);
+  border-bottom: 1px dashed rgba(34, 197, 94, 0.18);
+}
+
+.hacker-grid-cell-subdivide:nth-child(4n) {
+  border-right: none;
+}
+
+.hacker-grid-cell-subdivide:nth-last-child(-n + 4) {
+  border-bottom: none;
+}
+
+.integrity-segment {
+  height: 100%;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  background: rgba(3, 16, 5, 0.68);
+  transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.integrity-segment.active {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.75);
+}
+
+.integrity-segment.error {
+  background: rgba(239, 68, 68, 0.85);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.65);
+}
+
+.ingredient-cipher-highlight {
+  border-radius: 0.8rem;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: linear-gradient(125deg, rgba(236, 253, 245, 0.8), rgba(209, 250, 229, 0.6));
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.08);
+  padding: 0.18rem 0.45rem;
+}
+
+@keyframes orb-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes search-focus-pulse {
+  0%, 100% { filter: saturate(1); }
+  50% { filter: saturate(1.08); }
 }
 
 @keyframes beam-orbit {
@@ -369,5 +454,12 @@
 
   .secret-beam-outer {
     background: rgba(11, 17, 14, 0.68);
+  }
+
+  .recipe-parallax-image,
+  .alchemy-search-shell,
+  .integrity-segment,
+  .ingredient-cipher-highlight {
+    transition: none !important;
   }
 }

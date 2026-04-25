@@ -164,23 +164,43 @@ export function CipherCard({ event }: { event: EventMetadata }) {
                 </p>
               </div>
 
-              {(event.latitude && event.longitude) ? (
-                <div className="bg-zinc-900 overflow-hidden aspect-[21/9] relative flex items-center justify-center border border-zinc-800 mt-8 group">
-                  <iframe
-                    width="100%"
-                    height="100%"
-                    style={{border:0}}
-                    loading="lazy"
-                    allowFullScreen
-                    src={`https://www.google.com/maps?q=${event.latitude},${event.longitude}&z=15&output=embed`}
-                    className="grayscale opacity-50 group-hover:opacity-80 transition-opacity"
-                  ></iframe>
-                  <div className="absolute top-4 left-4 bg-black border border-emerald-900/30 backdrop-blur-sm px-4 py-3 rounded-sm shadow-[0_0_20px_rgba(0,0,0,0.8)] flex items-center gap-3">
-                    <MapPin className="w-4 h-4 text-emerald-500 animate-pulse" />
-                    <span className="text-xs font-mono tracking-widest text-emerald-400 uppercase">{event.locationName}</span>
+              {(() => {
+                const hasAttached = !!event.attachedLocation;
+                const hasAuto = !!(event.latitude && event.longitude);
+                if (!hasAttached && !hasAuto) return null;
+                const mapLat = hasAttached ? event.attachedLocation!.latitude : event.latitude;
+                const mapLng = hasAttached ? event.attachedLocation!.longitude : event.longitude;
+                const mapName = hasAttached ? event.attachedLocation!.name : event.locationName;
+                return (
+                  <div className="mt-8">
+                    {hasAttached && (
+                      <div className="flex items-center gap-2 mb-3">
+                        <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                        <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-emerald-500/80 border border-emerald-900/30 bg-emerald-950/20 px-3 py-1">
+                          {mapName}
+                        </span>
+                      </div>
+                    )}
+                    <div className="bg-zinc-900 overflow-hidden aspect-[21/9] relative flex items-center justify-center border border-zinc-800 group">
+                      <iframe
+                        width="100%"
+                        height="100%"
+                        style={{ border: 0 }}
+                        loading="lazy"
+                        allowFullScreen
+                        src={`https://www.google.com/maps?q=${mapLat},${mapLng}&z=15&output=embed`}
+                        className="grayscale opacity-50 group-hover:opacity-80 transition-opacity"
+                      />
+                      {!hasAttached && (
+                        <div className="absolute top-4 left-4 bg-black border border-emerald-900/30 backdrop-blur-sm px-4 py-3 rounded-sm shadow-[0_0_20px_rgba(0,0,0,0.8)] flex items-center gap-3">
+                          <MapPin className="w-4 h-4 text-emerald-500 animate-pulse" />
+                          <span className="text-xs font-mono tracking-widest text-emerald-400 uppercase">{mapName}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ): null}
+                );
+              })()}
             </motion.div>
           )}
 

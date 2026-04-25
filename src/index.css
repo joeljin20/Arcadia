@@ -437,6 +437,226 @@
   animation: cipher-pulse 2.1s ease-in-out infinite;
 }
 
+/* =====================================================
+   Phase A — FX Design Tokens & Utility Classes
+   ===================================================== */
+
+/* Holo border: sweeping gradient around any element */
+.fx-holo-border { position: relative; }
+.fx-holo-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(90deg,
+    rgba(34,197,94,0),
+    rgba(34,197,94,0.55),
+    rgba(34,211,238,0.38),
+    rgba(34,197,94,0)
+  );
+  background-size: 200% 100%;
+  animation: holo-sweep 2.8s linear infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+@keyframes holo-sweep {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Specular sweep — light pass over featured card every 8 s */
+@keyframes specular-sweep {
+  0%  { transform: translateX(-180%) skewX(-16deg); opacity: 0; }
+  4%  { opacity: 1; }
+  28% { transform: translateX(280%) skewX(-16deg); opacity: 0.6; }
+  30% { opacity: 0; }
+  100%{ transform: translateX(280%) skewX(-16deg); opacity: 0; }
+}
+.fx-specular {
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255,255,255,0.025) 43%,
+    rgba(255,255,255,0.085) 50%,
+    rgba(255,255,255,0.025) 57%,
+    transparent 70%
+  );
+  animation: specular-sweep 8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Spark burst on correct number click */
+@keyframes spark-burst {
+  0%   { transform: scale(0.1); opacity: 0.9; }
+  55%  { transform: scale(1.9); opacity: 0.5; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+.fx-spark {
+  animation: spark-burst 0.38s ease-out forwards;
+  border-radius: 9999px;
+  background: radial-gradient(circle,
+    rgba(52,211,153,0.9) 0%,
+    rgba(34,197,94,0.5) 40%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+/* Static noise burst on failure */
+@keyframes static-noise-bars {
+  0%  { opacity: 0.22; clip-path: inset(0% 0% 88% 0%); }
+  8%  { clip-path: inset(28% 0% 24% 0%); opacity: 0.28; }
+  16% { clip-path: inset(62% 0% 6% 0%);  opacity: 0.20; }
+  24% { clip-path: inset(10% 0% 71% 0%); opacity: 0.30; }
+  32% { clip-path: inset(78% 0% 8% 0%);  opacity: 0.24; }
+  40% { clip-path: inset(44% 0% 36% 0%); opacity: 0.26; }
+  48% { clip-path: inset(5% 0% 82% 0%);  opacity: 0.22; }
+  56% { clip-path: inset(66% 0% 14% 0%); opacity: 0.28; }
+  64% { clip-path: inset(32% 0% 48% 0%); opacity: 0.18; }
+  72% { clip-path: inset(88% 0% 3% 0%);  opacity: 0.24; }
+  80% { clip-path: inset(18% 0% 68% 0%); opacity: 0.20; }
+  90% { clip-path: inset(52% 0% 32% 0%); opacity: 0.14; }
+  100%{ opacity: 0; clip-path: inset(0% 0% 100% 0%); }
+}
+.fx-static-burst {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(34,197,94,0.14) 0px,
+    rgba(0,0,0,0) 2px,
+    rgba(34,197,94,0.07) 4px,
+    rgba(0,0,0,0) 6px
+  );
+  animation: static-noise-bars 0.48s steps(1,end) forwards;
+  pointer-events: none;
+}
+
+/* Hacker console boot scan beam */
+@keyframes boot-scan-pass {
+  0%   { top: -20%; opacity: 0.8; }
+  100% { top: 110%; opacity: 0.3; }
+}
+.fx-boot-scan {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(34,197,94,0.07) 40%,
+    rgba(34,197,94,0.20) 50%,
+    rgba(34,197,94,0.07) 60%,
+    transparent 100%
+  );
+  height: 18%;
+  width: 100%;
+  position: absolute;
+  left: 0;
+  animation: boot-scan-pass 0.42s ease-in forwards;
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* Targeting rings — scanner camera overlay */
+@keyframes ring-breathe {
+  0%, 100% { transform: scale(1);    opacity: 0.5; }
+  50%       { transform: scale(1.04); opacity: 0.24; }
+}
+.fx-ring-1 { animation: ring-breathe 2.2s ease-in-out infinite; }
+.fx-ring-2 { animation: ring-breathe 2.2s ease-in-out infinite 0.4s; }
+.fx-ring-3 { animation: ring-breathe 2.2s ease-in-out infinite 0.8s; }
+
+/* Pass flash on scanner success */
+@keyframes pass-flash {
+  0%   { opacity: 0; }
+  12%  { opacity: 0.8; }
+  55%  { opacity: 0.45; }
+  100% { opacity: 0; }
+}
+.fx-pass-flash {
+  background: radial-gradient(ellipse at center,
+    rgba(52,211,153,0.55) 0%,
+    rgba(34,197,94,0.25) 45%,
+    transparent 75%
+  );
+  animation: pass-flash 0.65s ease-out forwards;
+  pointer-events: none;
+}
+
+/* Network pulse on sidebar status dot */
+@keyframes net-pulse {
+  0%, 100% { box-shadow: 0 0 0 0   rgba(34,197,94,0); }
+  35%       { box-shadow: 0 0 0 5px rgba(34,197,94,0.3); }
+  65%       { box-shadow: 0 0 0 9px rgba(34,197,94,0); }
+}
+.fx-net-pulse { animation: net-pulse 2.6s ease-out infinite; }
+
+/* Tab ambient tint */
+.tab-theme-intel { --tab-col: rgba(34,197,94,0.06); }
+.tab-theme-vault { --tab-col: rgba(245,158,11,0.06); }
+.tab-theme-comms { --tab-col: rgba(6,182,212,0.06); }
+.tab-theme-intel,
+.tab-theme-vault,
+.tab-theme-comms {
+  background-color: var(--tab-col, transparent);
+  transition: background-color 0.45s ease;
+  border-radius: 0.75rem;
+}
+
+@keyframes modal-open-shake {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  15%  { transform: translate(-6px, 2px) rotate(-0.35deg); }
+  30%  { transform: translate(6px, -2px) rotate(0.25deg); }
+  48%  { transform: translate(-4px, 1px) rotate(-0.15deg); }
+  63%  { transform: translate(3px, -1px) rotate(0.08deg); }
+  78%  { transform: translate(-2px, 0px) rotate(0deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+.modal-shake {
+  animation: modal-open-shake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards;
+}
+
+@keyframes breach-glow-pulse {
+  0%, 100% {
+    text-shadow:
+      0 0 12px rgba(34, 197, 94, 0.7),
+      0 0 28px rgba(34, 197, 94, 0.45),
+      0 0 56px rgba(34, 197, 94, 0.2);
+  }
+  50% {
+    text-shadow:
+      0 0 24px rgba(34, 197, 94, 1),
+      0 0 52px rgba(34, 197, 94, 0.8),
+      0 0 104px rgba(34, 197, 94, 0.55);
+  }
+}
+.breach-glow-text {
+  color: #4ade80;
+  animation: breach-glow-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes needle-wobble {
+  0%,100% { transform: rotate(0deg);    }
+  25%      { transform: rotate(-2.8deg); }
+  75%      { transform: rotate( 2.8deg); }
+}
+
+@keyframes timer-drain {
+  from { width: 100%; }
+  to   { width: 0%;   }
+}
+
+/* KIO hold-lock countdown bar */
+@keyframes seal-countdown {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+
+/* Soften needle wobble for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes needle-wobble {
+    0%,100% { transform: rotate(0deg);    }
+    25%      { transform: rotate(-0.8deg); }
+    75%      { transform: rotate( 0.8deg); }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .beam-ring,
   .beam-aura,
@@ -446,7 +666,8 @@
   .cipher-pill,
   .cipher-pulse,
   .number-circle,
-  .number-circle:hover {
+  .number-circle:hover,
+  .breach-glow-text {
     animation: none !important;
     transition: none !important;
     transform: none !important;
@@ -460,6 +681,20 @@
   .alchemy-search-shell,
   .integrity-segment,
   .ingredient-cipher-highlight {
+    transition: none !important;
+  }
+
+  .fx-specular,
+  .fx-spark,
+  .fx-static-burst,
+  .fx-boot-scan,
+  .fx-ring-1, .fx-ring-2, .fx-ring-3,
+  .fx-pass-flash,
+  .fx-net-pulse,
+  .fx-holo-border::before,
+  .modal-shake,
+  .breach-glow-text {
+    animation: none !important;
     transition: none !important;
   }
 }

@@ -63,6 +63,7 @@ export function RecipeCard({
           <div className="absolute inset-0 bg-gradient-to-r from-[#020705]/92 via-[#05110d]/70 to-[#020705]/30" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#010302]/72 via-transparent to-[#010302]/20" />
         </div>
+        <div className="fx-specular absolute inset-0 z-20 pointer-events-none" />
         <div className="relative z-10 w-full max-w-[min(70%,560px)]">
           <span className="bg-emerald-500/18 text-emerald-100 text-[10px] font-bold px-3 py-1.5 rounded-full mb-5 inline-block tracking-[0.2em] border border-emerald-200/35">
             FEATURED ARCHIVE

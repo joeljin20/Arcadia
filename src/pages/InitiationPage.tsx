@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Sparkles, Camera, RefreshCw, Cpu, ShieldCheck, UserCircle } from 'lucide-react';
 import '@tensorflow/tfjs';
@@ -7,14 +7,39 @@ import * as mobilenet from '@tensorflow-models/mobilenet';
 import { ai } from '../services/gemini';
 import { playRitualSound, playAccessGranted, playTerminalError } from '../services/audio';
 import { loginWithAlias } from '../services/mockDB';
+import { KioAlignmentTrial } from '../components/initiation/KioAlignmentTrial';
+import { AngelBearingTrial } from '../components/initiation/AngelBearingTrial';
+import { ChamberiSignalTrial } from '../components/initiation/ChamberiSignalTrial';
 
 type VisionPrediction = { className: string; probability: number };
 
-// "key" (door/house/car key) is not an ImageNet or COCO class, so we use:
-//   1. MobileNet keywords for the closest ImageNet classes (padlock, lock, hook, tools)
-//   2. COCO-SSD scissors/knife — same elongated-metal silhouette as a key
-//   3. COCO bounding-box aspect ratio: keys are 2:1–5:1, which a knife/scissors bbox also matches
-// Thresholds are intentionally low because keys produce weak indirect signals.
+// ─── Live scanner state machine ───────────────────────────────────────────────
+type ScannerState =
+  | 'LOADING'
+  | 'READY_AWAITING'
+  | 'CATALYST_POSSIBLE'
+  | 'CATALYST_LOCKED'
+  | 'ANALYZING';
+
+// ─── Tunable constants ────────────────────────────────────────────────────────
+// Adjust here; no need to touch detection logic below.
+const VISION_CONFIG = {
+  FRAME_INTERVAL_MS:          200,   // inference cadence (~5 fps)
+  SCORE_ON_THRESHOLD:         0.14,  // EMA score to count as a "lock frame"
+  SCORE_OFF_THRESHOLD:        0.06,  // hysteresis: LOCKED → AWAITING only below this
+  SCORE_POSSIBLE_THRESHOLD:   0.06,  // shows CATALYST_POSSIBLE (approaching)
+  CONSECUTIVE_LOCK_FRAMES:    2,     // how many consecutive lock-frames to enter LOCKED
+  EMA_ALPHA:                  0.65,  // EMA weight for the newest frame (more reactive)
+  MIN_BBOX_AREA:              300,   // ignore COCO detections smaller than this (px²)
+  CENTER_WEIGHT:              0.14,  // bonus for object within 38% of frame centre
+  BURST_FRAMES_LOCKED:        2,     // capture-burst length when already live-locked
+  BURST_FRAMES_COLD:          3,     // capture-burst length when not locked
+  BURST_FRAME_GAP_MS:         250,   // gap between burst frames
+  CAPTURE_SCORE_THRESHOLD:    0.12,  // single-frame score required in capture burst
+} as const;
+
+// MobileNet ImageNet labels closest to "key" — kept broad because keys produce
+// weak, indirect classifier signals (not a proper ImageNet class).
 const KEY_MN_KEYWORDS = [
   'padlock', 'combination lock', ' lock', 'lock,',
   'hook,', ' hook', 'can opener', 'corkscrew', 'opener',
@@ -22,57 +47,102 @@ const KEY_MN_KEYWORDS = [
   'chain,', ' chain', 'clasp', 'clip,',
   'letter opener', 'wrench', 'screwdriver', 'tool,',
   'blade', 'knife,', 'cleaver',
+  'carabiner', 'safety pin', 'handle',
 ];
 
-const COCO_KEY_CLASSES = ['scissors', 'knife'];
+// COCO classes that share silhouette with a house key
+const COCO_KEY_CLASSES = ['scissors', 'knife', 'fork', 'spoon', 'remote', 'cell phone', 'pen', 'toothbrush'];
 
-function centerCrop(video: HTMLVideoElement, fraction = 0.65): HTMLCanvasElement {
+// Re-uses the same canvas across frames to avoid GC pressure
+function cropFrame(
+  video: HTMLVideoElement,
+  reusableCanvas: HTMLCanvasElement,
+  fraction: number,
+): HTMLCanvasElement {
   const size = Math.min(video.videoWidth, video.videoHeight) * fraction;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  canvas.getContext('2d')!.drawImage(
+  reusableCanvas.width  = size;
+  reusableCanvas.height = size;
+  reusableCanvas.getContext('2d')!.drawImage(
     video,
-    (video.videoWidth - size) / 2, (video.videoHeight - size) / 2,
+    (video.videoWidth  - size) / 2,
+    (video.videoHeight - size) / 2,
     size, size, 0, 0, size, size,
   );
-  return canvas;
+  return reusableCanvas;
 }
 
-function isKeyDetected(
-  fullPreds: VisionPrediction[],
-  cropPreds: VisionPrediction[],
-  cocoPreds: cocoSsd.DetectedObject[],
-): boolean {
-  const kwMatch = (p: VisionPrediction, t: number) =>
-    p.probability >= t && KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw));
-
-  if (fullPreds.some(p => kwMatch(p, 0.015))) return true;
-  if (cropPreds.some(p => kwMatch(p, 0.01))) return true;
-  if (cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.30)) return true;
-  // Key-shaped COCO box: elongated (2:1–6:1) with reasonable confidence
-  if (cocoPreds.some(p => {
-    const [, , w, h] = p.bbox;
-    const ratio = Math.max(w / h, h / w);
-    return ratio >= 2 && ratio <= 6 && p.score > 0.35;
-  })) return true;
-  return false;
+// Legacy helper retained for captureAndAnalyze burst path
+function centerCrop(video: HTMLVideoElement, fraction = 0.55): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  return cropFrame(video, canvas, fraction);
 }
 
-function isKeyVisibleNow(
-  preds: VisionPrediction[],
-  cocoPreds: cocoSsd.DetectedObject[],
-): boolean {
-  const kwHit = preds.some(p =>
-    p.probability >= 0.01 && KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw))
-  );
-  const cocoHit = cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.25);
-  const shapeHit = cocoPreds.some(p => {
-    const [, , w, h] = p.bbox;
-    const ratio = Math.max(w / h, h / w);
-    return ratio >= 2 && ratio <= 6 && p.score > 0.30;
-  });
-  return kwHit || cocoHit || shapeHit;
+// ─── Per-frame composite key-presence score (0–1) ────────────────────────────
+// Combines four independent signals:
+//   1. COCO class hit  — strongest (knife/scissors proxy)
+//   2. Shape prior     — elongated non-person bbox (only when no COCO class hit)
+//   3. MobileNet full-frame keyword probability
+//   4. MobileNet centre-crop keyword probability (higher weight: key fills more of crop)
+// Person-dominant frames suppress the MobileNet signals (face/clothing noise).
+function computeFrameScore(
+  mnFull: VisionPrediction[],
+  mnCrop: VisionPrediction[],
+  coco: cocoSsd.DetectedObject[],
+  videoW: number,
+  videoH: number,
+): number {
+  const personDominant = coco.some(p => p.class === 'person' && p.score > 0.50);
+  let s = 0;
+
+  // Signal 1 — COCO key-class hit
+  let cocoKeyHit = false;
+  for (const pred of coco) {
+    if (!COCO_KEY_CLASSES.includes(pred.class)) continue;
+    if (pred.score < 0.15) continue;
+    const [x, y, w, h] = pred.bbox;
+    if (w * h < VISION_CONFIG.MIN_BBOX_AREA) continue;
+    cocoKeyHit = true;
+    s += 0.55 * Math.min(pred.score, 0.95);
+    // Centre bonus — user presenting a key tends to centre it in frame
+    const cx = (x + w / 2) / videoW;
+    const cy = (y + h / 2) / videoH;
+    if (Math.sqrt((cx - 0.5) ** 2 + (cy - 0.5) ** 2) < 0.45) {
+      s += VISION_CONFIG.CENTER_WEIGHT;
+    }
+    break; // take the highest-confidence hit only
+  }
+
+  // Signal 2 — shape prior (elongated non-person); always fires for any non-person object
+  if (!cocoKeyHit) {
+    for (const pred of coco) {
+      if (pred.class === 'person' || pred.score < 0.18) continue;
+      const [, , w, h] = pred.bbox;
+      if (w * h < VISION_CONFIG.MIN_BBOX_AREA) continue;
+      const r = Math.max(w / h, h / w);
+      if (r >= 1.4 && r <= 12.0) {
+        s += 0.30 * pred.score;
+        break;
+      }
+    }
+  }
+
+  // Signals 3 & 4 — MobileNet keyword hits (suppressed when person dominates)
+  if (!personDominant) {
+    const kwScore = (preds: VisionPrediction[]): number =>
+      preds.reduce((best, p) =>
+        KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw))
+          ? Math.max(best, p.probability)
+          : best,
+      0);
+
+    const bestFull = kwScore(mnFull);
+    if (bestFull > 0.008) s += Math.min(0.25, bestFull * 5.0); // full-frame
+
+    const bestCrop = kwScore(mnCrop);
+    if (bestCrop > 0.006) s += Math.min(0.35, bestCrop * 7.0); // crop weighted higher
+  }
+
+  return Math.min(1.0, s);
 }
 
 function drawDetections(
@@ -82,21 +152,19 @@ function drawDetections(
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  canvas.width = video.videoWidth;
+  canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   preds.forEach(pred => {
+    if (!COCO_KEY_CLASSES.includes(pred.class)) return;
     const [x, y, w, h] = pred.bbox;
-    const isKey = COCO_KEY_CLASSES.includes(pred.class);
-    const alpha = Math.max(0.3, pred.score);
-    ctx.strokeStyle = isKey ? `rgba(34,197,94,${alpha})` : `rgba(34,197,94,${alpha * 0.5})`;
-    ctx.lineWidth = isKey ? 2 : 1;
-    ctx.setLineDash(isKey ? [] : [4, 4]);
+    const alpha = Math.max(0.4, pred.score);
+    ctx.strokeStyle = `rgba(34,197,94,${alpha})`;
+    ctx.lineWidth   = 2;
     ctx.strokeRect(x, y, w, h);
-    ctx.setLineDash([]);
-    ctx.fillStyle = isKey ? 'rgba(34,197,94,0.85)' : 'rgba(34,197,94,0.5)';
+    ctx.fillStyle = 'rgba(34,197,94,0.9)';
     ctx.font = 'bold 11px monospace';
-    ctx.fillText(`${pred.class.toUpperCase()} ${Math.round(pred.score * 100)}%`, x + 2, y > 18 ? y - 5 : y + h + 14);
+    ctx.fillText(`KEY ${Math.round(pred.score * 100)}%`, x + 2, y > 18 ? y - 5 : y + h + 14);
   });
 }
 
@@ -111,7 +179,7 @@ async function getMobileNetModel(): Promise<mobilenet.MobileNet> {
 
 async function warmupModel(model: mobilenet.MobileNet) {
   const warmCanvas = document.createElement('canvas');
-  warmCanvas.width = 224;
+  warmCanvas.width  = 224;
   warmCanvas.height = 224;
   const ctx = warmCanvas.getContext('2d');
   if (!ctx) return;
@@ -121,7 +189,7 @@ async function warmupModel(model: mobilenet.MobileNet) {
 }
 
 export function InitiationPage({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [step, setStep] = useState<'AUTH' | 'VISION' | 'PUZZLE' | 'RICKROLL'>('AUTH');
+  const [step, setStep] = useState<'AUTH' | 'VISION' | 'PUZZLE' | 'TRIAL_KIO' | 'TRIAL_ANGEL' | 'TRIAL_CHAMBERI' | 'RICKROLL'>('AUTH');
 
   useEffect(() => {
     playRitualSound();
@@ -153,6 +221,30 @@ export function InitiationPage({ onClose, onSuccess }: { onClose: () => void; on
       {step === 'PUZZLE' && (
         <InitiationPuzzle
           key="puzzle"
+          onClose={onClose}
+          onSuccess={() => {
+            playAccessGranted();
+            setStep('TRIAL_KIO');
+          }}
+        />
+      )}
+      {step === 'TRIAL_KIO' && (
+        <KioAlignmentTrial
+          key="trial_kio"
+          onClose={onClose}
+          onSuccess={() => setStep('TRIAL_ANGEL')}
+        />
+      )}
+      {step === 'TRIAL_ANGEL' && (
+        <AngelBearingTrial
+          key="trial_angel"
+          onClose={onClose}
+          onSuccess={() => setStep('TRIAL_CHAMBERI')}
+        />
+      )}
+      {step === 'TRIAL_CHAMBERI' && (
+        <ChamberiSignalTrial
+          key="trial_chamberi"
           onClose={onClose}
           onSuccess={() => {
             playAccessGranted();
@@ -303,33 +395,51 @@ function RickRollVideo({ onClose }: { onClose: () => void }) {
 }
 
 function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void; onSuccess: () => void; onFailure: () => void }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const cocoRef = useRef<cocoSsd.ObjectDetection | null>(null);
-  const mobileNetRef = useRef<mobilenet.MobileNet | null>(null);
+  const videoRef      = useRef<HTMLVideoElement>(null);
+  const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const cocoRef       = useRef<cocoSsd.ObjectDetection | null>(null);
+  const mobileNetRef  = useRef<mobilenet.MobileNet | null>(null);
   const detectionLoopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const streamRef     = useRef<MediaStream | null>(null);
+  const progressRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [modelsReady, setModelsReady] = useState(false);
-  const [modelLoadError, setModelLoadError] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [catalystVisible, setCatalystVisible] = useState(false);
-  const [keyVisible, setKeyVisible] = useState(false);
+  // Per-frame inference state (refs avoid stale closures in the loop)
+  const emaScoreRef    = useRef(0);
+  const consecutiveRef = useRef(0);
+  const isLockedRef    = useRef(false);
+  const analyzingRef   = useRef(false);
+  const cropCanvasRef  = useRef<HTMLCanvasElement | null>(null);
+
+  // React state (drives UI)
+  const [scannerState, _setScannerState] = useState<ScannerState>('LOADING');
+  const scannerStateRef = useRef<ScannerState>('LOADING');
+  const setScannerState = useCallback((s: ScannerState) => {
+    scannerStateRef.current = s;
+    _setScannerState(s);
+  }, []);
+
+  const [scanProgress, setScanProgress]   = useState(0);
+  const [error, setError]                 = useState<string | null>(null);
   const [liveDetections, setLiveDetections] = useState<cocoSsd.DetectedObject[]>([]);
-  const [topLabel, setTopLabel] = useState<string>('');
-  const [loadStep, setLoadStep] = useState<string>('Initializing catalyst scanner...');
-  const [loadNonce, setLoadNonce] = useState(0);
+  const [modelLoadError, setModelLoadError] = useState(false);
+  const [loadStep, setLoadStep]             = useState<string>('Initializing catalyst scanner...');
+  const [loadNonce, setLoadNonce]           = useState(0);
+  const [showPassFlash, setShowPassFlash]   = useState(false);
 
+  // Cleanup all timers on unmount
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    if (detectionLoopRef.current) clearTimeout(detectionLoopRef.current);
+    if (progressRef.current)      clearInterval(progressRef.current);
+  }, []);
+
+  // ── Model loading ────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-
     async function load() {
       try {
         setModelLoadError(false);
-        setModelsReady(false);
+        setScannerState('LOADING');
         setLoadStep('Loading object detector...');
         const coco = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
         if (cancelled) return;
@@ -340,8 +450,9 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
         await warmupModel(mn);
         if (cancelled) return;
         mobileNetRef.current = mn;
-        setModelsReady(true);
         setLoadStep('Scanner ready');
+        // scannerState transitions to READY_AWAITING once camera is also ready
+        // (handled below in camera effect)
       } catch {
         if (!cancelled) {
           setModelLoadError(true);
@@ -351,114 +462,219 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
       }
     }
     load();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadNonce]);
+    return () => { cancelled = true; };
+  }, [loadNonce, setScannerState]);
 
+  // ── Camera setup ─────────────────────────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
     async function setupCamera() {
       try {
         const s = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 } },
         });
+        if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = s;
         if (videoRef.current) {
           videoRef.current.srcObject = s;
-          videoRef.current.onloadeddata = () => setCameraReady(true);
+          videoRef.current.onloadeddata = () => {
+            if (!cancelled) {
+              // Transition to READY_AWAITING only once both models and camera are up
+              if (mobileNetRef.current && cocoRef.current) {
+                setScannerState('READY_AWAITING');
+              }
+            }
+          };
         }
       } catch {
-        setError('Camera access denied. Please enable it to proceed.');
+        if (!cancelled) setError('Camera access denied. Please enable it to proceed.');
       }
     }
     setupCamera();
-    return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      if (detectionLoopRef.current) clearTimeout(detectionLoopRef.current);
-    };
-  }, []);
+    return () => { cancelled = true; };
+  }, [setScannerState]);
 
+  // When models finish loading after camera is already ready, transition state
   useEffect(() => {
-    if (!modelsReady || !cameraReady) return;
+    if (
+      cocoRef.current && mobileNetRef.current &&
+      videoRef.current && videoRef.current.readyState >= 2 &&
+      scannerStateRef.current === 'LOADING'
+    ) {
+      setScannerState('READY_AWAITING');
+    }
+  });
+
+  // ── Live detection loop ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const isReady = scannerState === 'READY_AWAITING' ||
+                    scannerState === 'CATALYST_POSSIBLE' ||
+                    scannerState === 'CATALYST_LOCKED';
+    if (!isReady) return;
+
+    // Ensure reusable crop canvas exists
+    if (!cropCanvasRef.current) cropCanvasRef.current = document.createElement('canvas');
+
     let active = true;
 
     async function runLoop() {
-      if (!active || !cocoRef.current || !mobileNetRef.current || !videoRef.current || !canvasRef.current) return;
-      if (videoRef.current.readyState === 4) {
+      if (!active) return;
+
+      const video = videoRef.current;
+      const coco  = cocoRef.current;
+      const mn    = mobileNetRef.current;
+
+      if (video && coco && mn && video.readyState === 4 && !analyzingRef.current) {
         try {
-          const [cocoPreds, mnPreds] = await Promise.all([
-            cocoRef.current.detect(videoRef.current),
-            mobileNetRef.current.classify(videoRef.current, 5),
+          const cropCanvas = cropFrame(video, cropCanvasRef.current!, 0.55);
+          const [cocoPreds, mnFull, mnCrop] = await Promise.all([
+            coco.detect(video),
+            mn.classify(video, 5),
+            mn.classify(cropCanvas as unknown as HTMLVideoElement, 5),
           ]);
+
           if (!active) return;
+
+          // Draw COCO key-class boxes on overlay
+          drawDetections(canvasRef.current!, video, cocoPreds);
           setLiveDetections(cocoPreds);
-          drawDetections(canvasRef.current!, videoRef.current, cocoPreds);
-          const detected = isKeyVisibleNow(mnPreds, cocoPreds);
-          setKeyVisible(detected);
-          setCatalystVisible(detected || Boolean(mnPreds[0] && mnPreds[0].probability >= 0.18));
-          setTopLabel(mnPreds[0]?.className.split(',')[0] ?? '');
-        } catch { /* ignore intermittent errors */ }
+
+          // Compute composite score + EMA
+          const frameScore = computeFrameScore(mnFull, mnCrop, cocoPreds, video.videoWidth, video.videoHeight);
+          const ema = VISION_CONFIG.EMA_ALPHA * frameScore + (1 - VISION_CONFIG.EMA_ALPHA) * emaScoreRef.current;
+          emaScoreRef.current = ema;
+
+          // Hysteresis state machine
+          if (isLockedRef.current) {
+            // Already LOCKED: only drop if EMA falls well below threshold
+            if (ema < VISION_CONFIG.SCORE_OFF_THRESHOLD) {
+              isLockedRef.current  = false;
+              consecutiveRef.current = 0;
+              setScannerState('READY_AWAITING');
+            }
+          } else {
+            if (ema >= VISION_CONFIG.SCORE_ON_THRESHOLD) {
+              consecutiveRef.current += 1;
+              if (consecutiveRef.current >= VISION_CONFIG.CONSECUTIVE_LOCK_FRAMES) {
+                isLockedRef.current = true;
+                setScannerState('CATALYST_LOCKED');
+              } else {
+                setScannerState('CATALYST_POSSIBLE');
+              }
+            } else if (ema >= VISION_CONFIG.SCORE_POSSIBLE_THRESHOLD) {
+              consecutiveRef.current = 0;
+              setScannerState('CATALYST_POSSIBLE');
+            } else {
+              consecutiveRef.current = 0;
+              if (scannerStateRef.current !== 'READY_AWAITING') {
+                setScannerState('READY_AWAITING');
+              }
+            }
+          }
+        } catch { /* transient inference errors — keep looping */ }
       }
-      if (active) detectionLoopRef.current = setTimeout(runLoop, 300);
+
+      if (active) detectionLoopRef.current = setTimeout(runLoop, VISION_CONFIG.FRAME_INTERVAL_MS);
     }
 
     runLoop();
     return () => {
       active = false;
-      if (detectionLoopRef.current) clearTimeout(detectionLoopRef.current);
+      if (detectionLoopRef.current) { clearTimeout(detectionLoopRef.current); detectionLoopRef.current = null; }
     };
-  }, [modelsReady, cameraReady]);
+  // Re-run only when transitioning in/out of scannable states
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scannerState === 'LOADING' || scannerState === 'ANALYZING', setScannerState]);
 
-  const captureAndAnalyze = async () => {
-    if (!videoRef.current || analyzing || !modelsReady) return;
-    setAnalyzing(true);
+  // ── Capture & analyse burst ──────────────────────────────────────────────────
+  const captureAndAnalyze = useCallback(async () => {
+    if (analyzingRef.current || !mobileNetRef.current || !cocoRef.current || !videoRef.current) return;
+
+    analyzingRef.current = true;
+    setScannerState('ANALYZING');
     setScanProgress(0);
     setError(null);
 
-    const FRAMES = 4;
-    const FRAME_GAP = 300;
+    // Burst length depends on whether we already have a live lock
+    const FRAMES    = isLockedRef.current ? VISION_CONFIG.BURST_FRAMES_LOCKED : VISION_CONFIG.BURST_FRAMES_COLD;
+    const FRAME_GAP = VISION_CONFIG.BURST_FRAME_GAP_MS;
+    // Lower threshold if already locked (live EMA was already confident)
+    const THRESHOLD = isLockedRef.current
+      ? VISION_CONFIG.CAPTURE_SCORE_THRESHOLD * 0.75
+      : VISION_CONFIG.CAPTURE_SCORE_THRESHOLD;
 
-    const progressInterval = setInterval(() => {
-      setScanProgress((prev) => {
-        if (prev >= 85) { clearInterval(progressInterval); return 85; }
-        return prev + 4;
+    // Animate progress bar over the expected burst duration
+    const totalMs = FRAMES * FRAME_GAP;
+    progressRef.current = setInterval(() => {
+      setScanProgress(prev => {
+        if (prev >= 85) { clearInterval(progressRef.current!); return 85; }
+        return prev + Math.round(8000 / totalMs);
       });
-    }, (FRAMES * FRAME_GAP) / 22);
+    }, totalMs / 20);
 
     try {
       let detected = false;
 
       for (let i = 0; i < FRAMES && !detected; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, FRAME_GAP));
+        if (i > 0) await new Promise<void>(r => setTimeout(r, FRAME_GAP));
         const video = videoRef.current!;
-        const crop = centerCrop(video);
-        const [fullPreds, cropPreds, cocoPreds] = await Promise.all([
+        if (video.readyState < 4) continue;
+        const crop = centerCrop(video, 0.55);
+        const [mnFull, mnCrop, cocoPreds] = await Promise.all([
           mobileNetRef.current!.classify(video, 10),
           mobileNetRef.current!.classify(crop as unknown as HTMLVideoElement, 10),
           cocoRef.current!.detect(video),
         ]);
-        if (isKeyDetected(fullPreds, cropPreds, cocoPreds)) detected = true;
+        const score = computeFrameScore(mnFull, mnCrop, cocoPreds, video.videoWidth, video.videoHeight);
+        if (score >= THRESHOLD) detected = true;
       }
 
-      clearInterval(progressInterval);
+      clearInterval(progressRef.current!);
+      progressRef.current = null;
       setScanProgress(100);
+      if (detected) setShowPassFlash(true);
 
       setTimeout(() => {
-        setAnalyzing(false);
+        analyzingRef.current = false;
         setScanProgress(0);
+        // Restore live state
+        setScannerState(isLockedRef.current ? 'CATALYST_LOCKED' : 'READY_AWAITING');
         if (detected) onSuccess();
         else onFailure();
       }, 450);
     } catch (e) {
-      clearInterval(progressInterval);
-      console.error('[VisionScanner] error:', e);
+      if (progressRef.current) { clearInterval(progressRef.current); progressRef.current = null; }
+      console.error('[VisionScanner] capture error:', e);
       setError('Vision algorithm failed. Please try again.');
-      setAnalyzing(false);
+      analyzingRef.current = false;
       setScanProgress(0);
+      setScannerState(isLockedRef.current ? 'CATALYST_LOCKED' : 'READY_AWAITING');
     }
-  };
+  }, [onSuccess, onFailure, setScannerState]);
 
-  const isReady = modelsReady && cameraReady;
+  // ── Derived UI values ────────────────────────────────────────────────────────
+  const isReady    = scannerState !== 'LOADING' && !modelLoadError;
+  const analyzing  = scannerState === 'ANALYZING';
+  const isLocked   = scannerState === 'CATALYST_LOCKED';
+  const isPossible = scannerState === 'CATALYST_POSSIBLE';
+
+  const badgeBg    = isLocked   ? 'bg-emerald-950/90 border-emerald-500/50'
+                   : isPossible ? 'bg-amber-950/90 border-amber-500/40'
+                   :              'bg-black/60 border-white/10';
+  const dotColor   = isLocked   ? 'bg-emerald-400 animate-pulse'
+                   : isPossible ? 'bg-amber-400 animate-pulse'
+                   :              'bg-slate-600';
+  const badgeText  = isLocked   ? 'Catalyst Locked'
+                   : isPossible ? 'Catalyst Approaching'
+                   :              'Awaiting the Instrument';
+  const badgeTextColor = isLocked   ? 'text-emerald-400'
+                        : isPossible ? 'text-amber-400'
+                        :              'text-slate-500';
+
+  const ctaLabel = !isReady ? 'Initializing Scanner...' : isLocked ? 'Seal the Gate' : 'Present Catalyst';
+  const ctaClass = isLocked
+    ? 'w-full py-5 bg-emerald-500 text-black rounded-full font-bold uppercase tracking-[0.2em] shadow-[0_10px_40px_rgb(16,185,129,0.55)] flex items-center justify-center gap-3 hover:bg-emerald-400 transition-all hover:-translate-y-1 hover:shadow-[0_20px_60px_rgb(16,185,129,0.65)] text-sm border border-emerald-400/60'
+    : 'w-full py-5 bg-emerald-600/90 text-white rounded-full font-bold uppercase tracking-[0.2em] shadow-[0_10px_30px_rgb(16,185,129,0.3)] flex items-center justify-center gap-3 hover:bg-emerald-500 transition-all hover:-translate-y-1 hover:shadow-[0_20px_40px_rgb(16,185,129,0.4)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 text-sm border border-emerald-500/50';
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-[#FAF7F2]/95 backdrop-blur-xl flex items-center justify-center p-6">
@@ -474,13 +690,16 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               <span className="bg-gradient-to-r from-emerald-200 to-white bg-clip-text text-transparent">The Alchemist's Gate</span>
               <Sparkles className="text-emerald-500 w-8 h-8" />
             </h2>
-            <p className="text-[10px] tracking-[0.3em] uppercase text-emerald-500/80 font-bold">Hold up a key (house key, car key) to unseal Arcadia</p>
+            <p className="text-sm text-zinc-400/60 leading-relaxed max-w-xs mx-auto font-light">
+              The seal yields to nothing but its counterpart. Present the instrument of passage.
+            </p>
           </div>
 
           <div className="relative aspect-video bg-black rounded-3xl overflow-hidden border border-white/5 shadow-inner">
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover opacity-80" />
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{ objectFit: 'cover' }} />
 
+            {/* Corner frame guides */}
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute top-6 left-6 w-8 h-8 border-t-2 border-l-2 border-emerald-500/60 rounded-tl-lg" />
               <div className="absolute top-6 right-6 w-8 h-8 border-t-2 border-r-2 border-emerald-500/60 rounded-tr-lg" />
@@ -488,6 +707,20 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               <div className="absolute bottom-6 right-6 w-8 h-8 border-b-2 border-r-2 border-emerald-500/60 rounded-br-lg" />
             </div>
 
+            {/* Lock-state bottom bar */}
+            {isReady && isLocked && !analyzing && (
+              <div className="absolute bottom-0 inset-x-0 h-0.5 bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,1)]" />
+            )}
+
+            {/* Pass-flash overlay */}
+            {showPassFlash && (
+              <div
+                className="fx-pass-flash absolute inset-0 z-50 pointer-events-none rounded-3xl"
+                onAnimationEnd={() => setShowPassFlash(false)}
+              />
+            )}
+
+            {/* Model-loading overlay */}
             {!isReady && !modelLoadError && (
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4 backdrop-blur-sm">
                 <Cpu className="w-8 h-8 text-emerald-400 animate-pulse" />
@@ -505,6 +738,7 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               </div>
             )}
 
+            {/* Load-error overlay */}
             {modelLoadError && (
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-3">
                 <p className="text-red-400 text-xs font-mono uppercase tracking-widest">Scanner failed to initialize</p>
@@ -517,6 +751,7 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               </div>
             )}
 
+            {/* Analysing overlay */}
             {analyzing && (
               <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-white space-y-6 backdrop-blur-md px-12">
                 <p className="text-[10px] text-emerald-400 uppercase tracking-[0.3em] font-mono font-bold">Scanning Catalyst...</p>
@@ -536,16 +771,18 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               </div>
             )}
 
+            {/* Live detection badge */}
             {isReady && !analyzing && (
-              <div className={`absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 rounded-full border transition-all duration-500 ${keyVisible ? 'bg-emerald-950/90 border-emerald-500/50' : catalystVisible ? 'bg-emerald-950/40 border-emerald-500/30' : 'bg-black/60 border-white/10'}`}>
-                <div className={`w-1.5 h-1.5 rounded-full transition-colors ${keyVisible ? 'bg-emerald-400 animate-pulse' : catalystVisible ? 'bg-emerald-500/80' : 'bg-slate-600'}`} />
-                <span className={`text-[10px] font-mono uppercase tracking-widest font-bold transition-colors ${keyVisible ? 'text-emerald-400' : catalystVisible ? 'text-emerald-300' : 'text-slate-500'}`}>
-                  {keyVisible ? 'Catalyst Detected' : catalystVisible ? 'Object Present' : topLabel ? topLabel : 'Awaiting Catalyst...'}
+              <div className={`absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 rounded-full border transition-all duration-500 ${badgeBg}`}>
+                <div className={`w-1.5 h-1.5 rounded-full transition-colors ${dotColor}`} />
+                <span className={`text-[10px] font-mono uppercase tracking-widest font-bold transition-colors ${badgeTextColor}`}>
+                  {badgeText}
                 </span>
               </div>
             )}
           </div>
 
+          {/* COCO detection chips */}
           {isReady && !analyzing && liveDetections.length > 0 && (
             <div className="flex flex-wrap gap-2 justify-center">
               {liveDetections.slice(0, 5).map((d, i) => (
@@ -565,12 +802,10 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
           <button
             disabled={analyzing || !isReady}
             onClick={captureAndAnalyze}
-            className="w-full py-5 bg-emerald-600/90 text-white rounded-full font-bold uppercase tracking-[0.2em] shadow-[0_10px_30px_rgb(16,185,129,0.3)] flex items-center justify-center gap-3 hover:bg-emerald-500 transition-all hover:-translate-y-1 hover:shadow-[0_20px_40px_rgb(16,185,129,0.4)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 text-sm border border-emerald-500/50"
+            className={ctaClass}
           >
             <Camera className="w-5 h-5" />
-            <span>
-              {!isReady ? 'Initializing Scanner...' : 'Present Catalyst'}
-            </span>
+            <span>{ctaLabel}</span>
           </button>
 
           <button onClick={onSuccess} className="w-full py-3 bg-transparent text-emerald-500/50 hover:text-emerald-400 rounded-full font-bold uppercase tracking-[0.2em] text-[10px] transition-colors border border-transparent hover:border-emerald-500/30">

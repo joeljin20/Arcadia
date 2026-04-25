@@ -88,6 +88,12 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
   const [sequenceInput, setSequenceInput] = useState('');
   const [typedValidationState, setTypedValidationState] = useState<InputValidationState>('IDLE');
   const [typedValidationMessage, setTypedValidationMessage] = useState('');
+  const [booted, setBooted] = useState(false);
+  const [sparkedNum, setSparkedNum] = useState<number | null>(null);
+  const [showStatic, setShowStatic] = useState(false);
+  const [isShaking, setIsShaking] = useState(false);
+  const [hintRevealed, setHintRevealed] = useState(false);
+  const [egoVisible, setEgoVisible] = useState(false);
   const timeoutRefs = useRef<number[]>([]);
   const logDumpRef = useRef<HTMLDivElement | null>(null);
 
@@ -104,20 +110,24 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
     });
   }, []);
 
-  const expectedRemaining = useMemo(() => NUMBER_SEQUENCE.slice(currentIndex), [currentIndex]);
   const logLines = useMemo(() => {
+    const progress = Math.round((currentIndex / NUMBER_SEQUENCE.length) * 100);
     const lines = [
       '> SOURCE: The_Obsidian_Cipher_Torte.blog',
       '> NODE_GRID: [1..16]',
-      `> REQUIRED_SEQUENCE: [${NUMBER_SEQUENCE.join(', ')}]`,
+      '> PROTOCOL: SEQUENCE_LOCK_ACTIVE',
+      `> SEGMENTS_CONFIRMED: ${currentIndex} / ${NUMBER_SEQUENCE.length}`,
+      `> BREACH_PROBABILITY: ${progress}%`,
       `> CURRENT_INPUT: [${selectedNumbers.join(', ')}]`,
-      `> REMAINING: [${expectedRemaining.join(', ')}]`,
     ];
+    if (hintRevealed) {
+      lines.push(`> [CLASSIFIED] SEQUENCE_KEY: [${NUMBER_SEQUENCE.join(', ')}]`);
+    }
     if (status === 'BREACHED') {
       lines.push('>> ACCESS_GRANTED // PAYLOAD_UNLOCKED', '>> ET IN ARCADIA EGO');
     }
     return lines;
-  }, [expectedRemaining, selectedNumbers, status]);
+  }, [currentIndex, hintRevealed, selectedNumbers, status]);
 
   const clearScheduledTimeouts = () => {
     timeoutRefs.current.forEach((id) => window.clearTimeout(id));
@@ -152,12 +162,29 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
     setSequenceInput('');
     setTypedValidationState('IDLE');
     setTypedValidationMessage('');
+    setBooted(false);
+    setShowStatic(false);
+    setSparkedNum(null);
+    setIsShaking(true);
+    setHintRevealed(false);
+    setEgoVisible(false);
   }, [isOpen]);
 
   useEffect(() => {
     return () => {
       clearScheduledTimeouts();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!breachCelebration) { setEgoVisible(false); return; }
+    const id = window.setTimeout(() => setEgoVisible(true), 1500);
+    return () => window.clearTimeout(id);
+  }, [breachCelebration]);
+
+  const inputPlaceholder = useMemo(() => {
+    const safe = [3, 11, 8, 2, 14, 7, 5, 9];
+    return `e.g. ${safe.slice(0, NUMBER_SEQUENCE.length).join('-')}`;
   }, []);
 
   useEffect(() => {
@@ -242,6 +269,7 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
       setWrongNumber(value);
       setStatus('LOCKED');
       setIntegrityError(true);
+      setShowStatic(true);
       setTerminalMessage('> ERROR: ACCESS_DENIED // TRACE_ACTIVE');
 
       schedule(() => {
@@ -251,6 +279,7 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
     }
 
     playTerminalSuccess();
+    setSparkedNum(value);
 
     const nextIndex = currentIndex + 1;
     const nextSelectedNumbers = [...selectedNumbers, value];
@@ -317,12 +346,28 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
           className={`fixed inset-0 z-[90] bg-black/95 p-4 md:p-8 flex items-center justify-center ${integrityError || breachCelebration ? 'violent-glitch' : ''}`}
         >
           <div className="crt-overlay" />
+          {!booted && (
+            <div
+              className="fx-boot-scan absolute inset-0 z-30 pointer-events-none"
+              onAnimationEnd={() => setBooted(true)}
+            />
+          )}
+          {showStatic && (
+            <div
+              className="fx-static-burst absolute inset-0 z-[100] pointer-events-none"
+              onAnimationEnd={() => setShowStatic(false)}
+            />
+          )}
 
+          <div
+            className={`w-full max-w-6xl${isShaking ? ' modal-shake' : ''}`}
+            onAnimationEnd={() => setIsShaking(false)}
+          >
           <motion.div
             initial={{ y: 24, scale: 0.98 }}
             animate={{ y: 0, scale: 1 }}
             exit={{ y: 24, scale: 0.98 }}
-            className="relative w-full max-w-6xl h-[88vh] border border-[#22c55e]/40 bg-black shadow-[0_0_40px_rgba(34,197,94,0.25)] overflow-hidden"
+            className="relative w-full h-[88vh] border border-[#22c55e]/40 bg-black shadow-[0_0_40px_rgba(34,197,94,0.25)] overflow-hidden"
           >
             <div className="absolute inset-0 opacity-[0.05] pointer-events-none overflow-hidden">
               {dataColumns.map((column) => (
@@ -381,7 +426,7 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                           type="button"
                           onClick={() => handleNumberClick(num)}
                           disabled={status === 'LOCKED' || status === 'BREACHED'}
-                          className={`number-circle hacker-grid-cell-subdivide h-12 md:h-14 rounded-full border text-xs md:text-sm font-bold ${
+                          className={`number-circle hacker-grid-cell-subdivide h-12 md:h-14 rounded-full border text-xs md:text-sm font-bold relative overflow-hidden ${
                             isWrong
                               ? 'wrong'
                               : isSelected
@@ -390,6 +435,12 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                           }`}
                         >
                           {num}
+                          {sparkedNum === num && (
+                            <span
+                              className="fx-spark absolute inset-0 pointer-events-none"
+                              onAnimationEnd={() => setSparkedNum(null)}
+                            />
+                          )}
                         </button>
                       );
                     })}
@@ -411,7 +462,7 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                           }
                         }}
                         disabled={status === 'LOCKED' || status === 'BREACHED'}
-                        placeholder={`e.g. ${NUMBER_SEQUENCE.join('-')}`}
+                        placeholder={inputPlaceholder}
                         className="flex-1 bg-black border border-[#22c55e]/30 px-3 py-2 text-xs md:text-sm font-mono text-[#22c55e] focus:outline-none focus:border-[#22c55e] placeholder:text-[#22c55e]/40"
                       />
                       <button
@@ -456,6 +507,22 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                       })}
                     </div>
                   </div>
+
+                  <div className="pt-1">
+                    {!hintRevealed ? (
+                      <button
+                        type="button"
+                        onClick={() => setHintRevealed(true)}
+                        className="text-[10px] uppercase tracking-[0.18em] text-[#22c55e]/25 hover:text-amber-400/80 border border-[#22c55e]/12 hover:border-amber-500/40 px-3 py-1.5 transition-all w-full"
+                      >
+                        ⚠ Request Classified Intel
+                      </button>
+                    ) : (
+                      <p className="text-[10px] text-amber-400/70 font-mono tracking-widest text-center py-1">
+                        ▶ SEQUENCE_KEY TRANSMITTED TO LOG
+                      </p>
+                    )}
+                  </div>
                 </section>
 
                 <section className="border border-[#22c55e]/30 bg-[#050505] p-4 md:p-5 flex flex-col min-h-0">
@@ -482,7 +549,64 @@ export function HackerConsoleOverlay({ isOpen, onClose, onBreach }: HackerConsol
                 </section>
               </div>
             </div>
+
+            {/* ET IN ARCADIA EGO breach overlay */}
+            <AnimatePresence>
+              {egoVisible && (
+                <motion.div
+                  key="ego-overlay"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.65 }}
+                  className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/92 backdrop-blur-sm"
+                >
+                  <div className="scanline pointer-events-none" />
+
+                  <motion.p
+                    initial={{ opacity: 0, y: -12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3, duration: 0.5 }}
+                    className="text-[10px] uppercase tracking-[0.55em] text-[#22c55e]/50 mb-10 font-mono"
+                  >
+                    ◈ &nbsp; TRANSMISSION RECEIVED &nbsp; ◈
+                  </motion.p>
+
+                  <motion.h2
+                    initial={{ opacity: 0, scale: 0.82 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.55, duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
+                    className="breach-glow-text font-mono text-center px-6 terminal-text"
+                    style={{ fontSize: 'clamp(2.4rem, 5.5vw, 4.8rem)', letterSpacing: '0.14em' }}
+                  >
+                    ET IN ARCADIA EGO
+                  </motion.h2>
+
+                  <motion.div
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ delay: 1.0, duration: 0.7, ease: 'easeOut' }}
+                    className="h-px w-64 my-10 bg-gradient-to-r from-transparent via-[#22c55e]/55 to-transparent"
+                  />
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 1.25, duration: 0.5 }}
+                    className="text-center space-y-3"
+                  >
+                    <p className="text-[11px] font-mono text-[#22c55e]/70 tracking-[0.32em] uppercase">
+                      Access Granted &nbsp;//&nbsp; Payload Unlocked
+                    </p>
+                    <p className="text-[9px] font-mono text-[#22c55e]/30 tracking-[0.25em] uppercase">
+                      Session: {sessionId}
+                    </p>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
+          </div>
         </motion.div>
       ) : null}
     </AnimatePresence>

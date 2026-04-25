@@ -88,3 +88,40 @@ export type UnlockStage =
   | 'DETAIL_CLUE'
   | 'CONSOLE_CHALLENGE'
   | 'UNLOCKED';
+
+export type VaultCategory =
+  | 'Relics'
+  | 'Cipher Keys'
+  | 'Black Ledger'
+  | 'Oracular Signals'
+  | 'Initiation Artifacts'
+  | 'Forbidden Archives';
+
+export interface VaultItem {
+  id: string;
+  originalTitle: string;
+  alternateName?: string;
+  cipherTitle: string;
+  originalDescription: string;
+  cipherDescription: string;
+  category: VaultCategory;
+  sellerAlias: string;
+  startingBid: number;
+  currentPrice: number;
+  highestBid: number;
+  bids: Bid[];
+  decryptionKey: string;
+  imageUrl: string;
+  endsAt: number;
+  openedAt: number;
+  priceOpenedAt: number;
+}
+
+export interface VaultChat {
+  id: string;
+  lotId: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  timestamp: number;
+}

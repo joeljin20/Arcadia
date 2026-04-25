@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Terminal, LogOut, Radio, PackageOpen, MessageSquare, Mic, MicOff, Plus, Trash2, Activity, MapPin } from 'lucide-react';
-import { AuctionLot, EventMetadata, MemberIdentity, DirectMessage } from '../types';
-import { getAuctions, getEvents, generateIdentity, getMembers, getMessages, saveMessage, saveEvent, saveMember, removeMember, deleteMessage } from '../services/mockDB';
-import { AuctionCard } from '../components/AuctionCard';
+import { Terminal, LogOut, Radio, PackageOpen, Mic, MicOff, Activity, MapPin } from 'lucide-react';
+import { VaultItem, VaultCategory, EventMetadata, MemberIdentity } from '../types';
+import { getEvents, generateIdentity, saveEvent } from '../services/mockDB';
+import { getActiveVaultItems, saveActiveVaultItems, hasAcceptedNDA, acceptNDA, getCredits, CATEGORY_STYLES } from '../services/vaultDB';
+import { VaultNDAModal } from '../components/VaultNDAModal';
+import { VaultItemCard } from '../components/VaultItemCard';
+import { VaultDetail } from '../components/VaultDetail';
 import { CipherCard } from '../components/CipherCard';
 import { buildEmojiClue, chooseClueTypeForEventId, encodeForumCipher, extractLocation } from '../logic/cipher';
 import { ai } from '../services/gemini';
@@ -118,13 +121,22 @@ function MatrixRain() {
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none opacity-20 z-0" />;
 }
 
+const ALL_CATEGORIES: VaultCategory[] = ['Relics', 'Cipher Keys', 'Black Ledger', 'Oracular Signals', 'Initiation Artifacts', 'Forbidden Archives'];
+
 export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: () => void; onLogout: () => void }) {
-  const [lots, setLots] = useState<AuctionLot[]>([]);
   const [events, setEvents] = useState<EventMetadata[]>([]);
   const [identity, setIdentity] = useState<MemberIdentity | null>(null);
-  const [activeTab, setActiveTab] = useState<'INTEL' | 'VAULT' | 'COMMS'>('INTEL');
+  const [activeTab, setActiveTab] = useState<'INTEL' | 'VAULT'>('INTEL');
   const [prophecy, setProphecy] = useState<string>("Aligning the nodes for the next network cycle...");
   const [displayedProphecy, setDisplayedProphecy] = useState("");
+
+  // Vault state
+  const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
+  const [vaultCategory, setVaultCategory] = useState<VaultCategory | 'ALL'>('ALL');
+  const [selectedVaultId, setSelectedVaultId] = useState<string | null>(null);
+  const [showNDA, setShowNDA] = useState(false);
+  const [ndaAccepted, setNdaAccepted] = useState(() => hasAcceptedNDA());
+  const [credits, setCredits] = useState(() => getCredits());
   
   // Intel Input
   const [intelText, setIntelText] = useState("");
@@ -133,13 +145,6 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
   const [selectedLocation, setSelectedLocation] = useState<MadridLocation | null>(null);
   const recognitionRef = useRef<any>(null);
   
-  // Comms
-  const [members, setMembers] = useState<MemberIdentity[]>([]);
-  const [selectedMember, setSelectedMember] = useState<MemberIdentity | null>(null);
-  const [messages, setMessages] = useState<DirectMessage[]>([]);
-  const [messageText, setMessageText] = useState("");
-  const [isCreatingNewLink, setIsCreatingNewLink] = useState(false);
-  const [newLinkCodename, setNewLinkCodename] = useState("");
 
   useEffect(() => {
     let i = 0;
@@ -176,13 +181,37 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
     setIsRecording(!isRecording);
   };
 
+  // Load vault items and start price drift + rotation
+  useEffect(() => {
+    const items = getActiveVaultItems();
+    setVaultItems(items);
+
+    // Price drift every 8s
+    const driftId = setInterval(() => {
+      setVaultItems(prev => {
+        const now = Date.now();
+        const updated = prev.map(item => {
+          if (item.endsAt <= now) return item;
+          const drift = 1 + (Math.random() * 0.04 - 0.015); // ±2% random walk
+          const newPrice = Math.max(item.highestBid, Math.round(item.currentPrice * drift));
+          return { ...item, currentPrice: newPrice };
+        });
+        return updated;
+      });
+    }, 8000);
+
+    // Rotation check every 10s (timers are 2-5 min)
+    const rotateId = setInterval(() => {
+      setVaultItems(() => getActiveVaultItems());
+    }, 10000);
+
+    return () => { clearInterval(driftId); clearInterval(rotateId); };
+  }, []);
+
   useEffect(() => {
     const me = generateIdentity();
     setIdentity(me);
-    setLots(getAuctions());
     setEvents(getEvents());
-    setMembers(getMembers());
-    setMessages(getMessages(me.id));
 
     // Generate daily lore prophecy relevant to an auction
     async function loadLore() {
@@ -233,52 +262,20 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
     }
   };
 
-  const handleSendMessage = () => {
-    if (!messageText.trim() || !selectedMember || !identity) return;
-    const newMsg: DirectMessage = {
-      id: "msg_" + Date.now().toString(),
-      senderId: identity.id,
-      senderName: identity.codename,
-      receiverId: selectedMember.id,
-      content: messageText,
-      timestamp: Date.now()
-    };
-    saveMessage(identity.id, newMsg);
-    setMessages(getMessages(identity.id));
-    setMessageText("");
-  };
-
-  const handleEstablishLink = () => {
-    if (!newLinkCodename.trim()) return;
-    const newMember: MemberIdentity = {
-        id: "mem_" + Date.now().toString(),
-        codename: newLinkCodename,
-        joinDate: Date.now(),
-        deviceId: "REMOTE"
-    };
-    saveMember(newMember);
-    setMembers(getMembers());
-    setSelectedMember(newMember);
-    setIsCreatingNewLink(false);
-    setNewLinkCodename('');
-  };
-
-  const handleDeleteMember = (memberId: string) => {
-    removeMember(memberId);
-    setMembers(getMembers());
-    if (selectedMember?.id === memberId) {
-      setSelectedMember(null);
-    }
-  };
-
-  const handleDeleteMessage = (msgId: string) => {
-    if (!identity) return;
-    deleteMessage(identity.id, msgId);
-    setMessages(getMessages(identity.id));
-  };
 
   return (
     <div className="min-h-screen bg-black text-zinc-300 font-mono selection:bg-emerald-900/40 selection:text-emerald-100 crt-effect relative overflow-hidden">
+      {showNDA && (
+        <VaultNDAModal
+          onAccept={() => {
+            acceptNDA();
+            setNdaAccepted(true);
+            setShowNDA(false);
+            setActiveTab('VAULT');
+          }}
+          onDecline={() => setShowNDA(false)}
+        />
+      )}
       <MatrixRain />
       <div className="scanline" />
       
@@ -306,25 +303,39 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
           </div>
 
           <div className="flex flex-row md:flex-col gap-2 overflow-x-auto pb-4 md:pb-0">
-            <button 
+            <button
                 onClick={() => setActiveTab('INTEL')}
                 className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'INTEL' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
             >
                 <Radio className="w-4 h-4" /> Global Intel
             </button>
-            <button 
-                onClick={() => setActiveTab('VAULT')}
-                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'VAULT' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
+            <button
+                onClick={() => {
+                  if (!ndaAccepted) { setShowNDA(true); return; }
+                  setActiveTab('VAULT');
+                  setSelectedVaultId(null);
+                }}
+                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'VAULT' ? 'border-amber-500 text-amber-400 bg-amber-950/20 shadow-[inset_0_0_20px_rgba(245,158,11,0.05)]' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
             >
                 <PackageOpen className="w-4 h-4" /> The Vault
             </button>
-            <button 
-                onClick={() => setActiveTab('COMMS')}
-                className={`flex items-center gap-3 px-4 py-3 shrink-0 uppercase tracking-widest text-xs transition-all border-l-2 ${activeTab === 'COMMS' ? 'border-emerald-500 text-emerald-400 bg-emerald-950/20 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50'}`}
-            >
-                <MessageSquare className="w-4 h-4" /> Secure Comms
-            </button>
           </div>
+
+          {/* Credit bar */}
+          {ndaAccepted && (
+            <div className="hidden md:block space-y-2 mt-2">
+              <p className="text-[8px] uppercase tracking-[0.25em] text-amber-600 font-mono">Credit Balance</p>
+              <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-700 to-amber-500 transition-all duration-700 shadow-[0_0_6px_rgba(245,158,11,0.5)]"
+                  style={{ width: `${Math.min(100, (credits / 5000000) * 100)}%` }}
+                />
+              </div>
+              <p className={`text-[11px] font-mono font-bold ${credits < 200000 ? 'text-red-400 animate-pulse' : 'text-amber-400'}`}>
+                ℂ {credits.toLocaleString()}
+              </p>
+            </div>
+          )}
 
           {/* Network Traffic Decorator */}
           <div className="hidden md:block mt-8 opacity-20 space-y-1">
@@ -352,7 +363,7 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
         </div>
 
         {/* Main Content Area */}
-        <div className={`flex-1 w-full min-w-0 transition-colors duration-500 ${activeTab === 'INTEL' ? 'tab-theme-intel' : activeTab === 'VAULT' ? 'tab-theme-vault' : 'tab-theme-comms'}`}>
+        <div className={`flex-1 w-full min-w-0 transition-colors duration-500 ${activeTab === 'INTEL' ? 'tab-theme-intel' : 'tab-theme-vault'}`}>
           
           {/* LORE NOTICE */}
           <div className="mb-12 border-l border-emerald-900/50 pl-6 py-4 relative group bg-gradient-to-r from-emerald-950/20 to-transparent backdrop-blur-sm border-y border-zinc-900/50">
@@ -370,26 +381,82 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
           <AnimatePresence mode="wait">
             {activeTab === 'VAULT' && (
               <motion.div key="vault" initial={{opacity:0, filter:"blur(10px)"}} animate={{opacity:1, filter:"blur(0px)"}} exit={{opacity:0, filter:"blur(10px)"}} transition={{duration:0.4}}>
-                  <div className="mb-6 border border-emerald-900/20 bg-emerald-950/10 px-5 py-3.5 flex items-center gap-3">
-                    <span className="text-emerald-500/40 text-base">◈</span>
-                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-emerald-600/60">
-                      The vault seal yields to those who read the final sign.
-                    </p>
-                  </div>
-                  {lots.length === 0 ? (
-                    <div className="p-16 text-center text-zinc-600 font-mono text-[10px] tracking-[0.2em] uppercase border border-zinc-900 bg-zinc-950/30">No artifacts currently held in the vault.</div>
+                <AnimatePresence mode="wait">
+                  {selectedVaultId ? (
+                    <VaultDetail
+                      key={selectedVaultId}
+                      item={vaultItems.find(i => i.id === selectedVaultId)!}
+                      identity={identity}
+                      credits={credits}
+                      onBack={() => setSelectedVaultId(null)}
+                      onBidUpdate={(newCredits, updatedItems) => {
+                        setCredits(newCredits);
+                        setVaultItems(updatedItems);
+                        saveActiveVaultItems(updatedItems);
+                      }}
+                    />
                   ) : (
-                    <div className="grid grid-cols-1 gap-8">
-                       {lots.map(lot => (
-                         <AuctionCard
-                           key={lot.id}
-                           lot={lot}
-                           identity={identity}
-                           onBidUpdate={() => setLots(getAuctions())}
-                         />
-                       ))}
-                    </div>
+                    <motion.div key="grid" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="space-y-6">
+                      {/* header */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                          <h2 className="text-xl font-mono text-zinc-200 uppercase tracking-widest">The Vault</h2>
+                          <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest mt-1">
+                            {vaultItems.filter(i => i.endsAt > Date.now()).length} active lots
+                          </p>
+                        </div>
+                        {/* mobile credit */}
+                        <div className="md:hidden flex items-center gap-3 bg-zinc-950 border border-amber-900/30 px-4 py-2">
+                          <span className="text-[9px] uppercase tracking-widest font-mono text-amber-600">Credits</span>
+                          <span className="font-mono text-amber-400 text-sm font-bold">ℂ {credits.toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      {/* category filter */}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setVaultCategory('ALL')}
+                          className={`text-[9px] font-mono uppercase tracking-[0.2em] px-3 py-1.5 border transition-all ${vaultCategory === 'ALL' ? 'border-zinc-500 text-zinc-200 bg-zinc-900' : 'border-zinc-800 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700'}`}
+                        >
+                          All
+                        </button>
+                        {ALL_CATEGORIES.map(cat => {
+                          const s = CATEGORY_STYLES[cat];
+                          return (
+                            <button
+                              key={cat}
+                              onClick={() => setVaultCategory(cat)}
+                              className={`text-[9px] font-mono uppercase tracking-[0.2em] px-3 py-1.5 border transition-all ${vaultCategory === cat ? s.badge : 'border-zinc-800 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700'}`}
+                            >
+                              {cat}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* grid */}
+                      {(() => {
+                        const now = Date.now();
+                        const filtered = vaultItems.filter(i =>
+                          i.endsAt > now && (vaultCategory === 'ALL' || i.category === vaultCategory)
+                        );
+                        return filtered.length === 0 ? (
+                          <div className="p-16 text-center text-zinc-600 font-mono text-[10px] tracking-[0.2em] uppercase border border-zinc-900 bg-zinc-950/30">
+                            No active lots in this category.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <AnimatePresence>
+                              {filtered.map(item => (
+                                <VaultItemCard key={item.id} item={item} onSelect={setSelectedVaultId} />
+                              ))}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })()}
+                    </motion.div>
                   )}
+                </AnimatePresence>
               </motion.div>
             )}
 
@@ -459,146 +526,6 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
               </motion.div>
             )}
 
-            {activeTab === 'COMMS' && (
-               <motion.div key="comms" initial={{opacity:0, filter:"blur(10px)"}} animate={{opacity:1, filter:"blur(0px)"}} exit={{opacity:0, filter:"blur(10px)"}} transition={{duration:0.4}} className="flex flex-col gap-4">
-               <div className="border border-emerald-900/20 bg-emerald-950/10 px-5 py-3.5 flex items-center gap-3">
-                 <span className="text-emerald-500/40 text-base">◈</span>
-                 <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-emerald-600/60">
-                   New shadows are summoned by codename, not by name.
-                 </p>
-               </div>
-               <div className="h-[600px] flex flex-col md:flex-row border border-zinc-900 bg-zinc-950 relative overflow-hidden shadow-2xl">
-                  {/* Left Column: Shadow List */}
-                  <div className="w-full md:w-1/3 flex flex-col border-b md:border-b-0 md:border-r border-zinc-900 bg-black/50">
-                     <div className="p-4 border-b border-zinc-900 flex justify-between items-center bg-black">
-                       <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-mono">Known Shadows</p>
-                       <button onClick={() => { setIsCreatingNewLink(true); setSelectedMember(null); }} className="text-zinc-400 hover:text-zinc-100 transition-colors p-1" title="New Link">
-                          <Plus className="w-4 h-4" />
-                       </button>
-                     </div>
-                     <div className="flex-1 overflow-y-auto">
-                         {members.map(m => (
-                           <div
-                             key={m.id}
-                             className={`group w-full flex items-center justify-between px-5 py-4 border-b border-zinc-900/50 cursor-pointer transition-colors ${selectedMember?.id === m.id ? 'bg-emerald-950/10 border-l-2 border-l-emerald-500' : 'hover:bg-zinc-900/30 border-l-2 border-l-transparent'}`}
-                             onClick={() => { setSelectedMember(m); setIsCreatingNewLink(false); }}
-                           >
-                             <p className={`font-mono text-xs uppercase tracking-widest ${selectedMember?.id === m.id ? 'text-emerald-500' : 'text-zinc-400'}`}>{m.codename}</p>
-                             <button 
-                               onClick={(e) => { e.stopPropagation(); handleDeleteMember(m.id); }}
-                               className="text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-emerald-500 transition-all"
-                               title="Sever Link"
-                             >
-                               <Trash2 className="w-3.5 h-3.5" />
-                             </button>
-                           </div>
-                         ))}
-                         {members.length === 0 && (
-                             <p className="text-center text-zinc-600 font-mono text-[9px] uppercase tracking-[0.2em] uppercase p-6">No links established</p>
-                         )}
-                     </div>
-                  </div>
-
-                   {/* Right Column: Chat View */}
-                  <div className="flex-1 flex flex-col relative bg-black/80">
-                     {isCreatingNewLink ? (
-                        <div className="flex-1 flex flex-col items-center justify-center space-y-8 p-8">
-                            <div className="w-20 h-20 border border-emerald-900/30 rounded-sm flex items-center justify-center bg-zinc-950 shadow-[0_0_40px_rgba(16,185,129,0.05)] relative">
-                                <div className="absolute inset-0 bg-emerald-900/10 animate-ping rounded-sm"></div>
-                                <Radio className="w-8 h-8 text-emerald-600 z-10" />
-                            </div>
-                            <div className="text-center space-y-2">
-                                <h3 className="text-xl text-zinc-300">Establish Secure Link</h3>
-                                <p className="text-xs text-zinc-600 max-w-xs uppercase tracking-widest leading-relaxed">Provide target node key to initialize encrypted tunnel.</p>
-                            </div>
-                            <div className="flex md:flex-row flex-col gap-4 w-full max-w-sm mt-4">
-                                <input 
-                                    type="text"
-                                    placeholder="TARGET_NODE_ID..."
-                                    value={newLinkCodename}
-                                    onChange={(e) => setNewLinkCodename(e.target.value)}
-                                    className="flex-1 bg-black border border-zinc-800 px-4 py-3 text-zinc-300 focus:outline-none focus:border-emerald-900/50 uppercase text-xs tracking-widest text-center md:text-left shadow-inner"
-                                />
-                                <button 
-                                    onClick={handleEstablishLink} 
-                                    disabled={!newLinkCodename.trim()}
-                                    className="bg-emerald-600/20 text-emerald-500 border border-emerald-900/50 px-6 py-3 font-bold uppercase tracking-[0.2em] text-[10px] hover:bg-emerald-500 hover:text-black transition-colors disabled:opacity-20"
-                                >
-                                    Connect
-                                </button>
-                            </div>
-                        </div>
-                     ) : selectedMember ? (
-                       <>
-                          <div className="p-6 border-b border-zinc-900 bg-zinc-950/50 flex items-center gap-4">
-                             <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
-                             <div>
-                               <p className="text-xs text-zinc-500 tracking-[0.2em] uppercase">Encrypted Tunnel</p>
-                               <p className="text-lg text-zinc-200 uppercase tracking-wider">{selectedMember.codename}</p>
-                             </div>
-                          </div>
-                          
-                          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                             {messages.filter(m => (m.senderId === selectedMember.id && m.receiverId === identity?.id) || (m.senderId === identity?.id && m.receiverId === selectedMember.id)).map(m => {
-                                const isMe = m.senderId === identity?.id;
-                                return (
-                                  <div key={m.id} className={`flex group ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                     <div className={`flex items-center gap-3 max-w-[85%] ${isMe ? 'flex-row' : 'flex-row-reverse'}`}>
-                                       <button 
-                                         onClick={() => handleDeleteMessage(m.id)}
-                                         className="opacity-0 group-hover:opacity-100 p-1.5 text-zinc-700 hover:text-emerald-500 transition-all shrink-0 bg-zinc-900/30 rounded-sm"
-                                         title="Delete Message"
-                                       >
-                                         <Trash2 className="w-3.5 h-3.5" />
-                                       </button>
-                                       <div className={`px-5 py-4 border ${isMe ? 'bg-emerald-950/20 border-emerald-900/30 text-zinc-300' : 'bg-black border-zinc-900 text-zinc-400'}`}>
-                                          <p className="text-[15px] leading-relaxed relative">
-                                            {isMe && <span className="absolute -left-3 top-2 w-[2px] h-[70%] bg-emerald-700/50"></span>}
-                                            {!isMe && <span className="absolute -right-3 top-2 w-[2px] h-[70%] bg-zinc-800"></span>}
-                                            {m.content}
-                                          </p>
-                                          <p className="text-[8px] uppercase tracking-[0.2em] mt-3 opacity-40 text-right">
-                                             {new Date(m.timestamp).toLocaleTimeString()}
-                                          </p>
-                                       </div>
-                                     </div>
-                                  </div>
-                                );
-                             })}
-                             {messages.length === 0 && (
-                                <div className="h-full flex items-center justify-center">
-                                  <p className="text-zinc-700 text-[10px] tracking-[0.2em] uppercase font-mono border border-zinc-900 p-4">Silence on the line</p>
-                                </div>
-                             )}
-                          </div>
-
-                          <div className="p-6 bg-black border-t border-zinc-900">
-                             <div className="flex gap-4">
-                                <input 
-                                  type="text"
-                                  placeholder="Input command..."
-                                  className="flex-1 bg-black border border-zinc-800 px-4 py-3 text-emerald-400 focus:outline-none focus:border-emerald-900/50 focus:shadow-[0_0_10px_rgba(16,185,129,0.1)] transition-colors placeholder:text-zinc-700"
-                                  value={messageText}
-                                  onChange={(e) => setMessageText(e.target.value)}
-                                  onKeyDown={(e) => { if (e.key === 'Enter') handleSendMessage() }}
-                                />
-                                <button onClick={handleSendMessage} disabled={!messageText.trim()} className="bg-zinc-200 text-black px-6 font-bold uppercase tracking-widest text-[10px] hover:bg-emerald-400 transition-colors disabled:opacity-20 shrink-0">
-                                   Send
-                                </button>
-                             </div>
-                          </div>
-                       </>
-                     ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-zinc-700 p-8 text-center bg-black/30">
-                           <Terminal className="w-8 h-8 mb-6 opacity-30" />
-                           <p className="text-[10px] uppercase tracking-[0.2em]">Socket Disconnected</p>
-                           <p className="text-zinc-600/50 mt-2 text-xs max-w-xs pt-2 border-t border-zinc-900">Select an active node from the sidebar to establish a secure link.</p>
-                        </div>
-                     )}
-                  </div>
-               </div>
-               </motion.div>
-            )}
           </AnimatePresence>
         </div>
       </div>

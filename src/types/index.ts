@@ -52,6 +52,11 @@ export interface EventMetadata {
   clueMeta?: {
     index?: number;
   };
+  attachedLocation?: {
+    name: string;
+    latitude: number;
+    longitude: number;
+  };
 }
 
 export interface MemberIdentity {

@@ -1,12 +1,21 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Terminal, Shield, LogOut, Radio, PackageOpen, Users, MessageSquare, Send, Mic, MicOff, Plus, Trash2, Eye, Activity } from 'lucide-react';
+import { Terminal, LogOut, Radio, PackageOpen, MessageSquare, Mic, MicOff, Plus, Trash2, Activity, MapPin } from 'lucide-react';
 import { AuctionLot, EventMetadata, MemberIdentity, DirectMessage } from '../types';
 import { getAuctions, getEvents, generateIdentity, getMembers, getMessages, saveMessage, saveEvent, saveMember, removeMember, deleteMessage } from '../services/mockDB';
 import { AuctionCard } from '../components/AuctionCard';
 import { CipherCard } from '../components/CipherCard';
 import { buildEmojiClue, chooseClueTypeForEventId, encodeForumCipher, extractLocation } from '../logic/cipher';
 import { ai } from '../services/gemini';
+
+const MADRID_LOCATIONS = [
+  { name: 'Crystal Palace, Retiro', lat: 40.4138, lng: -3.6824 },
+  { name: 'Puerta del Sol', lat: 40.4168, lng: -3.7038 },
+  { name: 'Chamberí Ghost Station', lat: 40.4349, lng: -3.6993 },
+  { name: 'KIO Towers', lat: 40.4497, lng: -3.6936 },
+  { name: 'Templo de Debod', lat: 40.4236, lng: -3.7153 },
+] as const;
+type MadridLocation = typeof MADRID_LOCATIONS[number];
 
 function MatrixRain() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -121,6 +130,7 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
   const [intelText, setIntelText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isAnonymous, setIsAnonymous] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<MadridLocation | null>(null);
   const recognitionRef = useRef<any>(null);
   
   // Comms
@@ -210,10 +220,14 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
       cluePrompt: clue.cluePrompt,
       expectedAnswer: clue.expectedAnswer,
       clueMeta: clue.clueMeta,
+      attachedLocation: selectedLocation
+        ? { name: selectedLocation.name, latitude: selectedLocation.lat, longitude: selectedLocation.lng }
+        : undefined,
     };
     saveEvent(newEvent);
     setEvents(getEvents());
     setIntelText("");
+    setSelectedLocation(null);
     if (isRecording) {
       toggleRecording();
     }
@@ -356,16 +370,22 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
           <AnimatePresence mode="wait">
             {activeTab === 'VAULT' && (
               <motion.div key="vault" initial={{opacity:0, filter:"blur(10px)"}} animate={{opacity:1, filter:"blur(0px)"}} exit={{opacity:0, filter:"blur(10px)"}} transition={{duration:0.4}}>
+                  <div className="mb-6 border border-emerald-900/20 bg-emerald-950/10 px-5 py-3.5 flex items-center gap-3">
+                    <span className="text-emerald-500/40 text-base">◈</span>
+                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-emerald-600/60">
+                      The vault seal yields to those who read the final sign.
+                    </p>
+                  </div>
                   {lots.length === 0 ? (
                     <div className="p-16 text-center text-zinc-600 font-mono text-[10px] tracking-[0.2em] uppercase border border-zinc-900 bg-zinc-950/30">No artifacts currently held in the vault.</div>
                   ) : (
                     <div className="grid grid-cols-1 gap-8">
                        {lots.map(lot => (
-                         <AuctionCard 
-                           key={lot.id} 
-                           lot={lot} 
-                           identity={identity} 
-                           onBidUpdate={() => setLots(getAuctions())} 
+                         <AuctionCard
+                           key={lot.id}
+                           lot={lot}
+                           identity={identity}
+                           onBidUpdate={() => setLots(getAuctions())}
                          />
                        ))}
                     </div>
@@ -388,21 +408,44 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
                     </div>
                     
                     <div className="flex flex-col md:flex-row gap-4">
-                      <button 
+                      <button
                         onClick={toggleRecording}
                         className={`shrink-0 w-14 h-14 border transition-all flex items-center justify-center ${isRecording ? 'bg-emerald-950/50 text-emerald-500 border-emerald-900/50 animate-pulse shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'bg-black text-zinc-500 border-zinc-800 hover:border-zinc-600'}`}
                       >
                         {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
                       </button>
-                      <textarea 
+                      <textarea
                         value={intelText}
                         onChange={(e) => setIntelText(e.target.value)}
-                        placeholder={isRecording ? "Capturing audio input..." : "Encode your data payload here..."} 
+                        placeholder={isRecording ? "Capturing audio input..." : "Encode your data payload here..."}
                         className="flex-1 bg-black border border-zinc-800 px-5 py-4 text-zinc-300 focus:outline-none focus:border-emerald-900/50 focus:shadow-[0_0_10px_rgba(16,185,129,0.1)] resize-none min-h-[56px] transition-all"
                       />
                       <button onClick={handlePostIntel} disabled={!intelText} className="shrink-0 bg-zinc-200 text-black px-8 py-4 font-bold uppercase tracking-[0.2em] text-[10px] hover:bg-emerald-400 hover:text-black transition-colors flex items-center justify-center gap-3 disabled:opacity-30 disabled:hover:bg-zinc-200 h-[56px]">
                          Transmit
                       </button>
+                    </div>
+
+                    {/* Location attachment */}
+                    <div className="space-y-2">
+                      <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-600 font-mono flex items-center gap-2">
+                        <MapPin className="w-3 h-3" /> Attach Location
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {MADRID_LOCATIONS.map(loc => (
+                          <button
+                            key={loc.name}
+                            type="button"
+                            onClick={() => setSelectedLocation(selectedLocation?.name === loc.name ? null : loc)}
+                            className={`px-3 py-1.5 text-[9px] font-mono uppercase tracking-widest border transition-all ${
+                              selectedLocation?.name === loc.name
+                                ? 'border-emerald-500/60 text-emerald-400 bg-emerald-950/30'
+                                : 'border-zinc-800 text-zinc-600 hover:border-zinc-600 hover:text-zinc-400'
+                            }`}
+                          >
+                            ◈ {loc.name}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                  </div>
                  
@@ -417,7 +460,14 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
             )}
 
             {activeTab === 'COMMS' && (
-               <motion.div key="comms" initial={{opacity:0, filter:"blur(10px)"}} animate={{opacity:1, filter:"blur(0px)"}} exit={{opacity:0, filter:"blur(10px)"}} transition={{duration:0.4}} className="h-[600px] flex flex-col md:flex-row border border-zinc-900 bg-zinc-950 relative overflow-hidden shadow-2xl">
+               <motion.div key="comms" initial={{opacity:0, filter:"blur(10px)"}} animate={{opacity:1, filter:"blur(0px)"}} exit={{opacity:0, filter:"blur(10px)"}} transition={{duration:0.4}} className="flex flex-col gap-4">
+               <div className="border border-emerald-900/20 bg-emerald-950/10 px-5 py-3.5 flex items-center gap-3">
+                 <span className="text-emerald-500/40 text-base">◈</span>
+                 <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-emerald-600/60">
+                   New shadows are summoned by codename, not by name.
+                 </p>
+               </div>
+               <div className="h-[600px] flex flex-col md:flex-row border border-zinc-900 bg-zinc-950 relative overflow-hidden shadow-2xl">
                   {/* Left Column: Shadow List */}
                   <div className="w-full md:w-1/3 flex flex-col border-b md:border-b-0 md:border-r border-zinc-900 bg-black/50">
                      <div className="p-4 border-b border-zinc-900 flex justify-between items-center bg-black">
@@ -546,6 +596,7 @@ export function ArcadiaDashboard({ onAdminToggle, onLogout }: { onAdminToggle: (
                         </div>
                      )}
                   </div>
+               </div>
                </motion.div>
             )}
           </AnimatePresence>

@@ -631,6 +631,32 @@
   animation: breach-glow-pulse 1.8s ease-in-out infinite;
 }
 
+@keyframes needle-wobble {
+  0%,100% { transform: rotate(0deg);    }
+  25%      { transform: rotate(-2.8deg); }
+  75%      { transform: rotate( 2.8deg); }
+}
+
+@keyframes timer-drain {
+  from { width: 100%; }
+  to   { width: 0%;   }
+}
+
+/* KIO hold-lock countdown bar */
+@keyframes seal-countdown {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+
+/* Soften needle wobble for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes needle-wobble {
+    0%,100% { transform: rotate(0deg);    }
+    25%      { transform: rotate(-0.8deg); }
+    75%      { transform: rotate( 0.8deg); }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .beam-ring,
   .beam-aura,
@@ -640,7 +666,8 @@
   .cipher-pill,
   .cipher-pulse,
   .number-circle,
-  .number-circle:hover {
+  .number-circle:hover,
+  .breach-glow-text {
     animation: none !important;
     transition: none !important;
     transform: none !important;

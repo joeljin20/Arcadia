@@ -44,17 +44,20 @@ function isKeyDetected(
   cropPreds: VisionPrediction[],
   cocoPreds: cocoSsd.DetectedObject[],
 ): boolean {
+  // Suppress keyword hits when a person dominates the frame — faces produce noise-level
+  // matches against keywords like "hook", "chain", "bolt" at very low MobileNet probabilities.
+  const personDominant = cocoPreds.some(p => p.class === 'person' && p.score > 0.5);
+
   const kwMatch = (p: VisionPrediction, t: number) =>
     p.probability >= t && KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw));
 
-  if (fullPreds.some(p => kwMatch(p, 0.015))) return true;
-  if (cropPreds.some(p => kwMatch(p, 0.01))) return true;
-  if (cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.30)) return true;
-  // Key-shaped COCO box: elongated (2:1–6:1) with reasonable confidence
+  if (!personDominant && fullPreds.some(p => kwMatch(p, 0.03))) return true;
+  if (!personDominant && cropPreds.some(p => kwMatch(p, 0.025))) return true;
+  if (cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.35)) return true;
   if (cocoPreds.some(p => {
     const [, , w, h] = p.bbox;
     const ratio = Math.max(w / h, h / w);
-    return ratio >= 2 && ratio <= 6 && p.score > 0.35;
+    return ratio >= 2 && ratio <= 6 && p.score > 0.45 && p.class !== 'person';
   })) return true;
   return false;
 }
@@ -63,14 +66,15 @@ function isKeyVisibleNow(
   preds: VisionPrediction[],
   cocoPreds: cocoSsd.DetectedObject[],
 ): boolean {
-  const kwHit = preds.some(p =>
-    p.probability >= 0.01 && KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw))
+  const personDominant = cocoPreds.some(p => p.class === 'person' && p.score > 0.5);
+  const kwHit = !personDominant && preds.some(p =>
+    p.probability >= 0.04 && KEY_MN_KEYWORDS.some(kw => p.className.toLowerCase().includes(kw))
   );
-  const cocoHit = cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.25);
+  const cocoHit = cocoPreds.some(p => COCO_KEY_CLASSES.includes(p.class) && p.score > 0.35);
   const shapeHit = cocoPreds.some(p => {
     const [, , w, h] = p.bbox;
     const ratio = Math.max(w / h, h / w);
-    return ratio >= 2 && ratio <= 6 && p.score > 0.30;
+    return ratio >= 2 && ratio <= 6 && p.score > 0.45 && p.class !== 'person';
   });
   return kwHit || cocoHit || shapeHit;
 }
@@ -316,7 +320,6 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
   const [analyzing, setAnalyzing] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [catalystVisible, setCatalystVisible] = useState(false);
   const [keyVisible, setKeyVisible] = useState(false);
   const [liveDetections, setLiveDetections] = useState<cocoSsd.DetectedObject[]>([]);
   const [topLabel, setTopLabel] = useState<string>('');
@@ -396,7 +399,6 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
           drawDetections(canvasRef.current!, videoRef.current, cocoPreds);
           const detected = isKeyVisibleNow(mnPreds, cocoPreds);
           setKeyVisible(detected);
-          setCatalystVisible(detected || Boolean(mnPreds[0] && mnPreds[0].probability >= 0.18));
           setTopLabel(mnPreds[0]?.className.split(',')[0] ?? '');
         } catch { /* ignore intermittent errors */ }
       }
@@ -476,7 +478,9 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               <span className="bg-gradient-to-r from-emerald-200 to-white bg-clip-text text-transparent">The Alchemist's Gate</span>
               <Sparkles className="text-emerald-500 w-8 h-8" />
             </h2>
-            <p className="text-[10px] tracking-[0.3em] uppercase text-emerald-500/80 font-bold">Hold up a key (house key, car key) to unseal Arcadia</p>
+            <p className="text-sm text-zinc-400/60 leading-relaxed max-w-xs mx-auto font-light">
+              The seal yields to nothing but its counterpart. Present the instrument of passage.
+            </p>
           </div>
 
           <div className="relative aspect-video bg-black rounded-3xl overflow-hidden border border-white/5 shadow-inner">
@@ -489,14 +493,6 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
               <div className="absolute bottom-6 left-6 w-8 h-8 border-b-2 border-l-2 border-emerald-500/60 rounded-bl-lg" />
               <div className="absolute bottom-6 right-6 w-8 h-8 border-b-2 border-r-2 border-emerald-500/60 rounded-br-lg" />
             </div>
-
-            {isReady && !analyzing && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="fx-ring-1 w-20 h-20 rounded-full border border-emerald-500/25" />
-                <div className="fx-ring-2 absolute w-36 h-36 rounded-full border border-emerald-500/15" />
-                <div className="fx-ring-3 absolute w-52 h-52 rounded-full border border-emerald-500/08" />
-              </div>
-            )}
 
             {isReady && keyVisible && !analyzing && (
               <div className="absolute bottom-0 inset-x-0 h-0.5 bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]" />
@@ -558,10 +554,10 @@ function VisionScanner({ onClose, onSuccess, onFailure }: { onClose: () => void;
             )}
 
             {isReady && !analyzing && (
-              <div className={`absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 rounded-full border transition-all duration-500 ${keyVisible ? 'bg-emerald-950/90 border-emerald-500/50' : catalystVisible ? 'bg-emerald-950/40 border-emerald-500/30' : 'bg-black/60 border-white/10'}`}>
-                <div className={`w-1.5 h-1.5 rounded-full transition-colors ${keyVisible ? 'bg-emerald-400 animate-pulse' : catalystVisible ? 'bg-emerald-500/80' : 'bg-slate-600'}`} />
-                <span className={`text-[10px] font-mono uppercase tracking-widest font-bold transition-colors ${keyVisible ? 'text-emerald-400' : catalystVisible ? 'text-emerald-300' : 'text-slate-500'}`}>
-                  {keyVisible ? 'Catalyst Detected' : catalystVisible ? 'Object Present' : topLabel ? topLabel : 'Awaiting Catalyst...'}
+              <div className={`absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 rounded-full border transition-all duration-500 ${keyVisible ? 'bg-emerald-950/90 border-emerald-500/50' : 'bg-black/60 border-white/10'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full transition-colors ${keyVisible ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                <span className={`text-[10px] font-mono uppercase tracking-widest font-bold transition-colors ${keyVisible ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {keyVisible ? 'Catalyst Detected' : 'Awaiting the Instrument'}
                 </span>
               </div>
             )}
